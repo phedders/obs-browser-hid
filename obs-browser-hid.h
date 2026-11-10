@@ -42,6 +42,14 @@ bool obs_browser_hid_send_mouse_click(const char *source_name, const char *sourc
 				      long long click_count, const char *modifiers,
 				      int mode, bool no_move, char *err, size_t err_size);
 
+/**
+ * Opens OBS's interact window for the resolved target source (literal name,
+ * "current" or "interact"). Must be called on the Qt GUI thread. Returns false
+ * and fills `err` if the source cannot be resolved.
+ */
+bool obs_browser_hid_open_interact(const char *source_name, const char *source_uuid,
+				   char *err, size_t err_size);
+
 /** Creates the "Browser HID" dock. No-op when there is no Qt frontend. */
 void obs_browser_hid_ui_init(void);
 

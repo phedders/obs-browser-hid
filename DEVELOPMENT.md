@@ -235,7 +235,14 @@ Design points:
   action is a 22 px auto-raised `QToolButton` in the bottom row next to the
   status label, and Rescan uses the theme refresh icon. Both use OBS's QSS
   classes (`icon-cogs`, `icon-refresh`) and are re-polished so the theme
-  supplies the icon; a dark/light resource path is the fallback.
+  supplies the icon; a dark/light resource path is the fallback. The open
+  interact button uses OBS's own finger icon (`icon-touch` /
+  `interact.svg`).
+- **Open interact**: the finger button resolves the selected target with the
+  same literal/`current`/`interact` logic and calls
+  `obs_frontend_open_source_interaction()` through
+  `obs_browser_hid_open_interact()`; OBS then creates and raises the
+  standard interact window.
 - **Hotkeys**: every action gets
   `obs_hotkey_register_frontend("obs-browser-hid.action.<uuid>", ...)`;
   renames only call `obs_hotkey_set_description()`, so bindings survive.
@@ -367,7 +374,7 @@ the client's frame cap.
 
 | Path | Purpose |
 |------|---------|
-| `obs-browser-hid.c` | plugin entry point, vendor registration, `SendKey`/`SendText`/`SendMouseClick`, input dispatch, virtual-source resolution, hardening limits |
+| `obs-browser-hid.c` | plugin entry point, vendor registration, `SendKey`/`SendText`/`SendMouseClick`, input dispatch, virtual-source resolution, open-interact helper, hardening limits |
 | `obs-browser-hid.h` | shared C API used by the vendor handlers and the dock |
 | `obs-browser-hid-interact.cpp` | Qt helper: open interact window → browser source name; global click → source-canvas coordinates |
 | `obs-browser-hid-ui.cpp` | "Browser HID" dock, source picker and quick-action settings dialog |

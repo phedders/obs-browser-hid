@@ -219,6 +219,9 @@ from inside OBS without any websocket client:
   buttons to select the virtual sources;
 - the refresh icon (right of those buttons) rescans the list (it also
   refreshes automatically on scene changes and when OBS finishes loading);
+- the **finger icon** next to it opens the interact window for the selected
+  target (the same icon OBS uses for its Interact action), including when the
+  target is `current` or `interact`;
 - the **cog** at the bottom right opens the quick-action editor as a
   **non-modal window** - OBS, the scene view and interact windows stay
   usable while it is open. Each entry gets a **name** and is either a

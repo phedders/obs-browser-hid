@@ -1153,16 +1153,22 @@ private:
 		auto *currentButton = new QPushButton("Current", targetGroup);
 		auto *interactButton = new QPushButton("Interact", targetGroup);
 		auto *rescanButton = new QToolButton(targetGroup);
+		auto *openInteractButton = new QToolButton(targetGroup);
 		currentButton->setToolTip("First browser source in the programme scene");
 		interactButton->setToolTip("Browser source with an open interact window");
 		rescanButton->setToolTip("Rescan browser sources");
 		rescanButton->setAccessibleName("Rescan browser sources");
+		openInteractButton->setToolTip("Open the interact window for the target source");
+		openInteractButton->setAccessibleName("Open interact window");
 		apply_theme_icon(rescanButton, "icon-refresh", "theme:Dark/refresh.svg",
 				 ":/res/images/refresh.svg");
+		apply_theme_icon(openInteractButton, "icon-touch", "theme:Dark/interact.svg",
+				 ":/res/images/interact.svg");
 		targetButtons->addWidget(currentButton);
 		targetButtons->addWidget(interactButton);
 		targetButtons->addStretch(1);
 		targetButtons->addWidget(rescanButton);
+		targetButtons->addWidget(openInteractButton);
 		targetLayout->addLayout(targetButtons);
 		root->addWidget(targetGroup);
 
@@ -1214,6 +1220,16 @@ private:
 		});
 		connect(rescanButton, &QToolButton::clicked, this,
 			[this] { refresh_sources(selected_target()); });
+		connect(openInteractButton, &QToolButton::clicked, this, [this] {
+			const QString target = selected_target();
+			char err[512] = {0};
+			if (obs_browser_hid_open_interact(target.toUtf8().constData(),
+							  nullptr, err, sizeof(err)))
+				set_status(QString("Opened interact window for %1.").arg(target),
+					   false);
+			else
+				set_status(QString::fromUtf8(err), true);
+		});
 		connect(settingsButton_, &QToolButton::clicked, this, [this] { open_settings(); });
 		connect(target_, &QComboBox::currentIndexChanged, this, [this](int) {
 			save_settings(actions_, selected_target());

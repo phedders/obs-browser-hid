@@ -504,6 +504,20 @@ static obs_source_t *resolve_target_source(const char *name, const char *uuid,
 	return src; /* caller owns (release) */
 }
 
+bool obs_browser_hid_open_interact(const char *source_name, const char *source_uuid,
+				   char *err, size_t err_size)
+{
+	obs_source_t *src = resolve_target_source(source_name, source_uuid, err, err_size);
+	if (!src)
+		return false;
+
+	/* The frontend API marshals this to OBSBasic::OpenInteraction, which
+	 * creates (or re-creates) and raises the interact window. */
+	obs_frontend_open_source_interaction(src);
+	obs_source_release(src);
+	return true;
+}
+
 /*
  * ---------------------------------------------------------------------
  * Input dispatch (shared by the websocket vendor and the dock UI)
