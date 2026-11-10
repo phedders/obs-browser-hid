@@ -16,7 +16,10 @@
  *
  * Qt widgets are not thread-safe and obs-websocket invokes vendor request
  * callbacks from its own threads, so the scan is marshalled onto the Qt GUI
- * thread with a BlockingQueuedConnection before returning.
+ * thread with a BlockingQueuedConnection before returning. When the caller is
+ * already on the GUI thread (the "Browser HID" dock does this synchronously),
+ * a BlockingQueuedConnection would wait for the thread that is executing it
+ * and deadlock, so the scan then runs directly.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -25,6 +28,7 @@
 
 #include <QApplication>
 #include <QMetaObject>
+#include <QThread>
 #include <QWidget>
 
 static bool is_browser_source_id(obs_source_t *src)
@@ -107,56 +111,66 @@ static bool scan_interact_widget(QWidget *w, const QString &prefix, QString *res
 	return false;
 }
 
+/** Must be called from the Qt GUI thread. */
+static void scan_interact_windows(QString *result)
+{
+	const QString prefix = interaction_title_prefix();
+
+	for (QWidget *w : QApplication::allWidgets()) {
+		/* the interact dialog is parented to the main OBS window, so
+		 * it is NOT in topLevelWidgets(); isWindow() tells apart
+		 * own-window widgets regardless of parent */
+		if (scan_interact_widget(w, prefix, result))
+			return;
+	}
+
+	/* diagnostics: on failure, log what IS on screen (bounded +
+	 * sanitized: window titles come from user-created source names) */
+	constexpr int MAX_WINDOWS = 16;
+	constexpr int MAX_CHARS = 2000;
+	QString windows;
+	int listed = 0;
+	for (QWidget *w : QApplication::allWidgets()) {
+		if (!w->isWindow() || !w->isVisible())
+			continue;
+		if (listed++ >= MAX_WINDOWS)
+			break;
+		windows += QStringLiteral("%1 [%2]\n")
+				   .arg(QString::fromUtf8(w->metaObject()->className()),
+					log_safe(w->windowTitle().left(200)));
+		if (windows.size() >= MAX_CHARS)
+			break;
+	}
+	blog(LOG_DEBUG, "[obs-browser-hid-interact] no interact window found; visible windows:%s",
+	     qUtf8Printable(log_safe(windows)));
+}
+
 /** Returns a bfree()-able strdup of the browser source name shown in the
  *  (first) open interact window, or NULL when there is none. */
 extern "C" char *obs_browser_hid_interact_source_name(void)
 {
+	QCoreApplication *app = QCoreApplication::instance();
+
 	/* Headless/non-Qt hosts have no widget tree to inspect. */
-	if (!QApplication::instance())
+	if (!app)
 		return NULL;
 
 	QString result;
-	const bool invoked = QMetaObject::invokeMethod(
-		QApplication::instance(),
-		[&result]() {
-			const QString prefix = interaction_title_prefix();
 
-			for (QWidget *w : QApplication::allWidgets()) {
-				/* the interact dialog is parented to the main
-				 * OBS window, so it is NOT in
-				 * topLevelWidgets(); isWindow() tells apart
-				 * own-window widgets regardless of parent */
-				if (scan_interact_widget(w, prefix, &result))
-					return;
-			}
+	if (QThread::currentThread() == app->thread()) {
+		/* Already on the GUI thread (dock quick actions): run the
+		 * scan directly. A BlockingQueuedConnection here would wait
+		 * for the current thread and freeze the whole UI. */
+		scan_interact_windows(&result);
+	} else {
+		const bool invoked = QMetaObject::invokeMethod(
+			app, [&result]() { scan_interact_windows(&result); },
+			Qt::BlockingQueuedConnection);
 
-			/* diagnostics: on failure, log what IS on screen
-			 * (bounded + sanitized: window titles come from
-			 * user-created source names) */
-			constexpr int MAX_WINDOWS = 16;
-			constexpr int MAX_CHARS = 2000;
-			QString windows;
-			int listed = 0;
-			for (QWidget *w : QApplication::allWidgets()) {
-				if (!w->isWindow() || !w->isVisible())
-					continue;
-				if (listed++ >= MAX_WINDOWS)
-					break;
-				windows += QStringLiteral("%1 [%2]\n")
-						   .arg(QString::fromUtf8(
-								w->metaObject()->className()),
-							log_safe(w->windowTitle().left(200)));
-				if (windows.size() >= MAX_CHARS)
-					break;
-			}
-			blog(LOG_DEBUG,
-			     "[obs-browser-hid-interact] no interact window found; visible windows:%s",
-			     qUtf8Printable(log_safe(windows)));
-		},
-		Qt::BlockingQueuedConnection);
-
-	if (!invoked)
-		blog(LOG_WARNING, "[obs-browser-hid-interact] could not run the widget scan on the GUI thread");
+		if (!invoked)
+			blog(LOG_WARNING,
+			     "[obs-browser-hid-interact] could not run the widget scan on the GUI thread");
+	}
 
 	return result.isEmpty() ? NULL : bstrdup(result.toUtf8().constData());
 }

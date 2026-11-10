@@ -166,7 +166,10 @@ Two non-obvious traps:
    `QApplication::topLevelWidgets()`. Use `QApplication::allWidgets()` and
    filter on `isWindow()`.
 2. **Threading** - vendor callbacks run off the Qt GUI thread, so any Qt access
-   must be marshalled with `Qt::BlockingQueuedConnection`. Conversely, don't
+   must be marshalled with `Qt::BlockingQueuedConnection`. The UI calls the
+   same helper *on* the GUI thread, where that connection type would wait for
+   itself and freeze OBS, so it runs the scan directly when
+   `QThread::currentThread()` is the application thread. Conversely, don't
    call `libobs` mutating functions from arbitrary threads; the source lookup
    here is refcounted and thread-safe.
 
@@ -213,7 +216,9 @@ Design points:
   the form applies changes to the selected action immediately (guarded by a
   `loading_` flag while fields are programmatically populated).
 - **Threading**: everything here runs on the Qt GUI thread; blocking CEF
-  input calls are the same ones the frontend already makes.
+  input calls are the same ones the frontend already makes. Because the dock
+  calls the shared dispatch from that thread, the `interact` resolver must not
+  self-marshal - it detects the GUI thread and scans directly (see above).
 
 ---
 
