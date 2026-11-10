@@ -130,7 +130,7 @@ version:
 	}
 	scripts/set-version.sh "$(NEW_VERSION)"
 
-tag: check-version
+tag: check-version check-clean
 	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
 		tag_commit=$$(git rev-list -n1 "v$(VERSION)"); \
 		head_commit=$$(git rev-parse HEAD); \
