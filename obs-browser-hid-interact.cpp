@@ -65,36 +65,39 @@ static QString log_safe(const QString &s)
 	return out;
 }
 
-/** The interact dialog title's static part up to (and including) the %1
- *  placeholder's quoting (e.g. "Interacting with '"). */
-static QString interaction_title_prefix(void)
+/** The localized interact-window title pattern, containing "%1" where the
+ *  source name is substituted (en-US: "Interacting with '%1'"). */
+static QString interaction_title_pattern(void)
 {
 	const char *loc = obs_frontend_get_locale_string("Basic.InteractionWindow");
-	QString pattern = loc ? QString::fromUtf8(loc) : QStringLiteral("Interacting with '%1'");
-	QString prefix = pattern;
-	prefix.replace("%1", "");
-	return prefix;
+	return loc ? QString::fromUtf8(loc) : QStringLiteral("Interacting with '%1'");
 }
 
-/** Extracts the source name from an interact dialog title. Falls back to
- *  matching the title suffix against all browser source names for locales
- *  whose title pattern is unknown. Must be called from the Qt GUI thread. */
-static QString interact_title_source_name(QWidget *w, const QString &prefix)
+/** Extracts the source name from an interact dialog title. Splits the
+ *  localized pattern around %1 (so quoting and other wrapping text are
+ *  handled), and falls back to the longest browser-source name contained in
+ *  the title. Must be called from the Qt GUI thread. */
+static QString interact_title_source_name(QWidget *w)
 {
 	const QString title = w->windowTitle();
+	const QString pattern = interaction_title_pattern();
+	const int placeholder = pattern.indexOf("%1");
 
-	if (title.length() > prefix.length() && title.startsWith(prefix)) {
-		QString name = title.mid(prefix.length());
-		/* en-US pattern ends the title with a quote around the name */
-		if (name.endsWith(u'\''))
-			name.chop(1);
-		if (!name.isEmpty())
-			return name;
+	if (placeholder >= 0) {
+		const QString pre = pattern.left(placeholder);
+		const QString post = pattern.mid(placeholder + 2);
+		if (title.length() >= pre.length() + post.length() &&
+		    title.startsWith(pre) && title.endsWith(post)) {
+			const QString name =
+				title.mid(pre.length(),
+					  title.length() - pre.length() - post.length());
+			if (!name.isEmpty())
+				return name;
+		}
 	}
 
-	/* Locale fallback: patterns where %1 is not at the end (quoted or
-	 * wrapped in translated text) still contain the source name. Pick
-	 * the longest browser-source name found in the title. */
+	/* Fallback: the title still contains the source name; pick the
+	 * longest browser-source name it contains. */
 	struct name_ctx {
 		QString title;
 		QString match;
@@ -117,12 +120,12 @@ static QString interact_title_source_name(QWidget *w, const QString &prefix)
 }
 
 /** Must be called from the Qt GUI thread. */
-static bool scan_interact_widget(QWidget *w, const QString &prefix, QString *result)
+static bool scan_interact_widget(QWidget *w, QString *result)
 {
 	if (!w->isWindow() || !w->isVisible() || !w->inherits("OBSBasicInteraction"))
 		return false;
 
-	const QString name = interact_title_source_name(w, prefix);
+	const QString name = interact_title_source_name(w);
 	if (name.isEmpty())
 		return false;
 
@@ -133,13 +136,11 @@ static bool scan_interact_widget(QWidget *w, const QString &prefix, QString *res
 /** Must be called from the Qt GUI thread. */
 static void scan_interact_windows(QString *result)
 {
-	const QString prefix = interaction_title_prefix();
-
 	for (QWidget *w : QApplication::allWidgets()) {
 		/* the interact dialog is parented to the main OBS window, so
 		 * it is NOT in topLevelWidgets(); isWindow() tells apart
 		 * own-window widgets regardless of parent */
-		if (scan_interact_widget(w, prefix, result))
+		if (scan_interact_widget(w, result))
 			return;
 	}
 
@@ -226,7 +227,7 @@ static bool map_preview_point(QWidget *dialog, QWidget *preview, const QPoint &l
 			      int *rel_x, int *rel_y, char *source_name,
 			      size_t source_name_size)
 {
-	const QString name = interact_title_source_name(dialog, interaction_title_prefix());
+	const QString name = interact_title_source_name(dialog);
 	if (name.isEmpty()) {
 		blog(LOG_DEBUG,
 		     "[obs-browser-hid-interact] could not resolve the source from interact title '%s'",

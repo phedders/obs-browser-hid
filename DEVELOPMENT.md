@@ -249,9 +249,10 @@ Design points:
   then the aspect-fit centre/scale math from `display-helpers.hpp`). The
   press and its release are both swallowed; on release X/Y go through the
   normal spin-box edit path and the dialog is shown again. Esc, the overlay's
-  Cancel button, or a 60 s timeout aborts without changes. Source lookup uses
-  the interact title's locale prefix first and, for locales that wrap `%1` in
-  other text, the longest browser-source name contained in the title.
+  Cancel button, or a 60 s timeout aborts without changes. Source lookup
+  splits the localized title pattern around `%1` (so the quoting in
+  `Interacting with '%1'` and other wrapping text are both handled) and, as
+  a fallback, picks the longest browser-source name contained in the title.
 - **Threading**: everything here runs on the Qt GUI thread; blocking CEF
   input calls are the same ones the frontend already makes. Because the dock
   calls the shared dispatch from that thread, the `interact` resolver must not
@@ -443,6 +444,9 @@ vendor registration when disabled.
 - Vendor callbacks are not on the Qt GUI thread and may be concurrent — no
   `strtok`, no static buffers.
 - The interact dialog is parented, so `topLevelWidgets()` misses it.
+- The interact title pattern has text around `%1` (`Interacting with '%1'`);
+  deleting the placeholder yields `Interacting with ''` and never matches.
+  Split the pattern around `%1` and compare the prefix/suffix.
 - `obs_scene_enum_items()` returns `void` in libobs 33; the callback's `bool`
   return decides whether enumeration continues.
 - A stale installed `.so` shows up as `code=600 (No request was found by that
