@@ -100,13 +100,15 @@ packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm
 Build the binary RPMs from it:
 
 ```sh
-rpmbuild --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm
+rpmbuild --define "_topdir $(pwd)/packaging/rpm/rpmbuild" \
+    --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm
 ```
 
 If OBS is not installed as a development package, use a built obs-studio tree:
 
 ```sh
-rpmbuild --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm \
+rpmbuild --define "_topdir $(pwd)/packaging/rpm/rpmbuild" \
+    --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm \
     --define 'obs_studio_dir /path/to/obs-studio'
 ```
 
@@ -120,6 +122,10 @@ ws-obs-1.0.0-*.rpm
 
 Notes:
 
+- Build the binary RPMs on an RPM-based host (Fedora/openSUSE, or a
+  compatible container): the spec uses the distro `%cmake`, `%cmake_build`
+  and `%cmake_install` macros. Creating the SRPM works anywhere `rpmbuild`
+  is available.
 - The Rust client is built with `cargo build --release --locked`. The SRPM
   includes `Cargo.lock`; building still needs crates.io access (or a warm
   cargo cache), because the crates are not vendored.
