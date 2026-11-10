@@ -1,0 +1,19 @@
+[package]
+name = "ws-obs"
+version = "1.0.0"
+edition = "2021"
+description = "Send WebSocket control packets to OBS (obs-websocket vendor requests), e.g. keyboard/mouse input to a browser source via the obs-browser-hid plugin"
+
+[[bin]]
+name = "ws-obs"
+path = "src/main.rs"
+
+[dependencies]
+tungstenite = "0.24"
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+
+[profile.release]
+strip = true
+lto = true
