@@ -33,7 +33,8 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 add_library(obs-browser-hid MODULE
 	obs-browser-hid.c
-	obs-browser-hid-interact.cpp)
+	obs-browser-hid-interact.cpp
+	obs-browser-hid-ui.cpp)
 
 target_include_directories(obs-browser-hid PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}
@@ -54,6 +55,7 @@ set_target_properties(obs-browser-hid PROPERTIES
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED YES)
 target_compile_definitions(obs-browser-hid PRIVATE QT_NO_KEYWORDS)
+target_compile_options(obs-browser-hid PRIVATE -Wall -Wextra)
 
 install(TARGETS obs-browser-hid
 	LIBRARY DESTINATION ${OBS_PLUGIN_INSTALL_DIR})

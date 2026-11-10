@@ -34,7 +34,9 @@
 #include <obs-frontend-api.h>
 
 #include "obs-websocket-api.h"
+#include "obs-browser-hid.h"
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -74,22 +76,42 @@ static obs_websocket_vendor ws_vendor = NULL;
  * ---------------------------------------------------------------------
  */
 
-static void set_error(obs_data_t *response_data, const char *fmt, ...)
+/** Formats `fmt` into buf, replacing control characters with '?' (the
+ *  messages can echo untrusted request fields; OBS log-injection guard). */
+static void format_err(char *buf, size_t size, const char *fmt, va_list args)
 {
-	va_list args;
-	char buf[512];
-
-	va_start(args, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, args);
-	va_end(args);
-
-	/* set_error text partly echoes untrusted request fields; neutralize
-	 * control characters before it reaches the OBS log (log-injection). */
+	vsnprintf(buf, size, fmt, args);
 	for (char *c = buf; *c; c++) {
 		unsigned char u = (unsigned char)*c;
 		if (u < 0x20 || u == 0x7f)
 			*c = '?';
 	}
+}
+
+/** Core-side error: write into the caller's buffer and log it. */
+static void set_err(char *err, size_t err_size, const char *fmt, ...)
+{
+	char buf[512];
+	va_list args;
+
+	va_start(args, fmt);
+	format_err(buf, sizeof(buf), fmt, args);
+	va_end(args);
+
+	if (err && err_size)
+		snprintf(err, err_size, "%s", buf);
+	blog(LOG_WARNING, "[obs-browser-hid] %s", buf);
+}
+
+/** Vendor-side error: goes into `responseData.error` and the log. */
+static void set_error(obs_data_t *response_data, const char *fmt, ...)
+{
+	char buf[512];
+	va_list args;
+
+	va_start(args, fmt);
+	format_err(buf, sizeof(buf), fmt, args);
+	va_end(args);
 
 	obs_data_set_string(response_data, "error", buf);
 	blog(LOG_WARNING, "[obs-browser-hid] %s", buf);
@@ -432,31 +454,31 @@ static bool resolve_key(const char *key_name, struct modifier_mask *mods,
  * ---------------------------------------------------------------------
  */
 
-/** Common plumbing for all requests: locate + validate the browser source.
- *  Besides literal source names, two virtual names are understood:
+/** Common plumbing for all send paths (vendor + UI): locate + validate the
+ *  browser source. Besides literal source names, two virtual names are
+ *  understood:
  *    "current"  - first browser source in the active program scene
  *    "interact" - the browser source with an open interact window        */
-static obs_source_t *get_browser_source(obs_data_t *request_data, obs_data_t *response_data)
+static obs_source_t *resolve_target_source(const char *name, const char *uuid,
+					   char *err, size_t err_size)
 {
-	const char *name = obs_data_get_string(request_data, "sourceName");
-	const char *uuid = obs_data_get_string(request_data, "sourceUuid");
 	obs_source_t *src = NULL;
 
 	if (name && *name) {
 		if (strlen(name) > BSOURCE_NAME_MAX) {
-			set_error(response_data, "sourceName is too long (max %u bytes)", BSOURCE_NAME_MAX);
+			set_err(err, err_size, "sourceName is too long (max %u bytes)", BSOURCE_NAME_MAX);
 			return NULL;
 		}
 		if (strcmp(name, "current") == 0) {
 			src = resolve_current_browser_source();
 			if (!src) {
-				set_error(response_data, "'current': no browser source found in the active program scene");
+				set_err(err, err_size, "'current': no browser source found in the active program scene");
 				return NULL;
 			}
 		} else if (strcmp(name, "interact") == 0) {
 			src = resolve_interact_browser_source();
 			if (!src) {
-				set_error(response_data, "'interact': no interact window is open (or its source is not a browser source)");
+				set_err(err, err_size, "'interact': no interact window is open (or its source is not a browser source)");
 				return NULL;
 			}
 		} else {
@@ -467,19 +489,59 @@ static obs_source_t *get_browser_source(obs_data_t *request_data, obs_data_t *re
 		src = obs_get_source_by_uuid(uuid);
 
 	if (!src) {
-		set_error(response_data, "No source found with the given sourceName/sourceUuid");
+		set_err(err, err_size, "No source found with the given sourceName/sourceUuid");
 		return NULL;
 	}
 
 	const char *id = obs_source_get_unversioned_id(src);
 	if (!id || strcmp(id, BROWSER_SOURCE_ID) != 0) {
-		set_error(response_data, "Source '%s' is not a browser source (id=%s)",
-			  SAFE_STR(obs_source_get_name(src)), SAFE_STR(id));
+		set_err(err, err_size, "Source '%s' is not a browser source (id=%s)",
+			SAFE_STR(obs_source_get_name(src)), SAFE_STR(id));
 		obs_source_release(src);
 		return NULL;
 	}
 
 	return src; /* caller owns (release) */
+}
+
+/*
+ * ---------------------------------------------------------------------
+ * Input dispatch (shared by the websocket vendor and the dock UI)
+ * ---------------------------------------------------------------------
+ */
+
+bool obs_browser_hid_send_key(const char *source_name, const char *source_uuid,
+			      const char *key, const char *modifiers, int mode,
+			      const char *text_override, char *err, size_t err_size)
+{
+	obs_source_t *src = resolve_target_source(source_name, source_uuid, err, err_size);
+	if (!src)
+		return false;
+
+	struct key_event_info info;
+	struct modifier_mask mods;
+	modifier_mask_init(&mods);
+	modifier_mask_parse(&mods, modifiers);
+
+	if (!resolve_key(key, &mods, text_override, &info)) {
+		set_err(err, err_size, "Could not resolve key '%s'", SAFE_STR(key));
+		obs_source_release(src);
+		return false;
+	}
+
+	if (mode != OBS_BROWSER_HID_RELEASE)
+		obs_source_send_key_click(src, &info.event, false);
+	if (mode != OBS_BROWSER_HID_PRESS)
+		obs_source_send_key_click(src, &info.event, true);
+
+	char key_log[BKEY_NAME_MAX + 1], mods_log[BSPEC_MAX + 1], src_log[256];
+	copy_logstr(key_log, sizeof(key_log), key);
+	copy_logstr(mods_log, sizeof(mods_log), modifiers);
+	copy_logstr(src_log, sizeof(src_log), obs_source_get_name(src));
+	blog(LOG_INFO, "[obs-browser-hid] SendKey '%s' (modifiers '%s') to '%s'", key_log, mods_log, src_log);
+
+	obs_source_release(src);
+	return true;
 }
 
 /**
@@ -503,41 +565,18 @@ static void send_key_request(obs_data_t *request_data, obs_data_t *response_data
 {
 	UNUSED_PARAMETER(priv);
 
-	obs_source_t *src = get_browser_source(request_data, response_data);
-	if (!src)
-		return;
-
-	const char *key = obs_data_get_string(request_data, "key");
-	const char *modifiers_str = obs_data_get_string(request_data, "modifiers");
-	const char *text_override = obs_data_get_string(request_data, "text");
 	bool have_key_up = obs_data_has_user_value(request_data, "keyUp");
 	bool key_up = obs_data_get_bool(request_data, "keyUp");
+	int mode = !have_key_up ? OBS_BROWSER_HID_BOTH
+				: (key_up ? OBS_BROWSER_HID_RELEASE : OBS_BROWSER_HID_PRESS);
 
-	struct key_event_info info;
-	struct modifier_mask mods;
-	modifier_mask_init(&mods);
-	modifier_mask_parse(&mods, modifiers_str);
-
-	if (!resolve_key(key, &mods, text_override, &info)) {
-		set_error(response_data, "Could not resolve key '%s'", SAFE_STR(key));
-		obs_source_release(src);
-		return;
-	}
-
-	if (!have_key_up || !key_up) {
-		obs_source_send_key_click(src, &info.event, false);
-	}
-	if (!have_key_up || key_up) {
-		obs_source_send_key_click(src, &info.event, true);
-	}
-
-	char key_log[BKEY_NAME_MAX + 1], mods_log[BSPEC_MAX + 1], src_log[256];
-	copy_logstr(key_log, sizeof(key_log), key);
-	copy_logstr(mods_log, sizeof(mods_log), modifiers_str);
-	copy_logstr(src_log, sizeof(src_log), obs_source_get_name(src));
-	blog(LOG_INFO, "[obs-browser-hid] SendKey '%s' (modifiers '%s') to '%s'", key_log, mods_log, src_log);
-
-	obs_source_release(src);
+	char err[512];
+	if (!obs_browser_hid_send_key(obs_data_get_string(request_data, "sourceName"),
+				      obs_data_get_string(request_data, "sourceUuid"),
+				      obs_data_get_string(request_data, "key"),
+				      obs_data_get_string(request_data, "modifiers"), mode,
+				      obs_data_get_string(request_data, "text"), err, sizeof(err)))
+		set_error(response_data, "%s", err);
 }
 
 /**
@@ -548,25 +587,22 @@ static void send_key_request(obs_data_t *request_data, obs_data_t *response_data
  *
  * Types the entire string, character by character (press + release each).
  */
-static void send_text_request(obs_data_t *request_data, obs_data_t *response_data, void *priv)
+bool obs_browser_hid_send_text(const char *source_name, const char *source_uuid,
+			       const char *text, char *err, size_t err_size)
 {
-	UNUSED_PARAMETER(priv);
-
-	obs_source_t *src = get_browser_source(request_data, response_data);
+	obs_source_t *src = resolve_target_source(source_name, source_uuid, err, err_size);
 	if (!src)
-		return;
+		return false;
 
-	const char *text = obs_data_get_string(request_data, "text");
 	if (!text) {
-		set_error(response_data, "Field 'text' is required");
+		set_err(err, err_size, "Field 'text' is required");
 		obs_source_release(src);
-		return;
+		return false;
 	}
 	if (strlen(text) > BTEXT_MAX) {
-		set_error(response_data, "text is too long (%zu bytes, max %u)",
-			  strlen(text), BTEXT_MAX);
+		set_err(err, err_size, "text is too long (%zu bytes, max %u)", strlen(text), BTEXT_MAX);
 		obs_source_release(src);
-		return;
+		return false;
 	}
 
 	struct key_event_info info;
@@ -602,6 +638,18 @@ static void send_text_request(obs_data_t *request_data, obs_data_t *response_dat
 	blog(LOG_INFO, "[obs-browser-hid] SendText %zu chars to '%s'", count, src_log);
 
 	obs_source_release(src);
+	return true;
+}
+
+static void send_text_request(obs_data_t *request_data, obs_data_t *response_data, void *priv)
+{
+	UNUSED_PARAMETER(priv);
+
+	char err[512];
+	if (!obs_browser_hid_send_text(obs_data_get_string(request_data, "sourceName"),
+				       obs_data_get_string(request_data, "sourceUuid"),
+				       obs_data_get_string(request_data, "text"), err, sizeof(err)))
+		set_error(response_data, "%s", err);
 }
 
 /**
@@ -621,86 +669,100 @@ static void send_text_request(obs_data_t *request_data, obs_data_t *response_dat
  *   noMove      : bool, optional - true: skip the cursor-move event that
  *                 is normally sent to the position before clicking
  */
-static void send_mouse_click_request(obs_data_t *request_data, obs_data_t *response_data, void *priv)
+bool obs_browser_hid_send_mouse_click(const char *source_name, const char *source_uuid,
+				      long long x, long long y, const char *button_str,
+				      long long click_count, const char *modifiers,
+				      int mode, bool no_move, char *err, size_t err_size)
 {
-	UNUSED_PARAMETER(priv);
-
-	obs_source_t *src = get_browser_source(request_data, response_data);
+	obs_source_t *src = resolve_target_source(source_name, source_uuid, err, err_size);
 	if (!src)
-		return;
+		return false;
 
 	struct obs_mouse_event ev;
 	memset(&ev, 0, sizeof(ev));
 
-	/* Coordinates arrive as untrusted int64s; clamp to a sane window
+	/* Coordinates may come from untrusted int64s; clamp to a sane window
 	 * (8K canvases are far below this) before casting to int32. */
-	long long x64 = obs_data_get_int(request_data, "x");
-	long long y64 = obs_data_get_int(request_data, "y");
-	bool have_x = obs_data_has_user_value(request_data, "x");
-	bool have_y = obs_data_has_user_value(request_data, "y");
-	if (!have_x || !have_y) {
-		set_error(response_data, "Fields 'x' and 'y' are required");
-		obs_source_release(src);
-		return;
-	}
-	if (x64 < -BMOUSE_COORD_MAX)
-		x64 = -BMOUSE_COORD_MAX;
-	else if (x64 > BMOUSE_COORD_MAX)
-		x64 = BMOUSE_COORD_MAX;
-	if (y64 < -BMOUSE_COORD_MAX)
-		y64 = -BMOUSE_COORD_MAX;
-	else if (y64 > BMOUSE_COORD_MAX)
-		y64 = BMOUSE_COORD_MAX;
-	ev.x = (int32_t)x64;
-	ev.y = (int32_t)y64;
+	if (x < -BMOUSE_COORD_MAX)
+		x = -BMOUSE_COORD_MAX;
+	else if (x > BMOUSE_COORD_MAX)
+		x = BMOUSE_COORD_MAX;
+	if (y < -BMOUSE_COORD_MAX)
+		y = -BMOUSE_COORD_MAX;
+	else if (y > BMOUSE_COORD_MAX)
+		y = BMOUSE_COORD_MAX;
+	ev.x = (int32_t)x;
+	ev.y = (int32_t)y;
 
+	const char *button_log = button_str && *button_str ? button_str : "left";
 	int32_t button;
-	const char *button_str = obs_data_get_string(request_data, "button");
-	if (*button_str == 0) {
-		button = MOUSE_LEFT;
-	} else if (strcmp(button_str, "left") == 0 || strcmp(button_str, "l") == 0) {
+	if (!button_str || !*button_str || strcmp(button_str, "left") == 0 || strcmp(button_str, "l") == 0) {
 		button = MOUSE_LEFT;
 	} else if (strcmp(button_str, "middle") == 0 || strcmp(button_str, "m") == 0) {
 		button = MOUSE_MIDDLE;
 	} else if (strcmp(button_str, "right") == 0 || strcmp(button_str, "r") == 0) {
 		button = MOUSE_RIGHT;
 	} else {
-		set_error(response_data, "Unknown button '%s' (left|middle|right)", button_str);
+		set_err(err, err_size, "Unknown button '%s' (left|middle|right)", button_str);
 		obs_source_release(src);
-		return;
+		return false;
 	}
 
-	long long cc = obs_data_get_int(request_data, "clickCount");
-	if (cc <= 0)
-		cc = 1;
-	else if (cc > BCOUNTCLICK_MAX)
-		cc = BCOUNTCLICK_MAX;
-	uint32_t click_count = (uint32_t)cc;
-
-	bool have_mouse_up = obs_data_has_user_value(request_data, "mouseUp");
-	bool mouse_up = obs_data_get_bool(request_data, "mouseUp");
-	bool move_first = !(obs_data_has_user_value(request_data, "noMove") && obs_data_get_bool(request_data, "noMove"));
+	if (click_count <= 0)
+		click_count = 1;
+	else if (click_count > BCOUNTCLICK_MAX)
+		click_count = BCOUNTCLICK_MAX;
+	uint32_t clicks = (uint32_t)click_count;
 
 	struct modifier_mask mods;
 	modifier_mask_init(&mods);
-	modifier_mask_parse(&mods, obs_data_get_string(request_data, "modifiers"));
+	modifier_mask_parse(&mods, modifiers);
 	/* Mouse events carry the INTERACT_* flags on all platforms. */
 	ev.modifiers = mods.interact;
 
-	if (move_first)
+	if (!no_move)
 		obs_source_send_mouse_move(src, &ev, false);
-	if (!have_mouse_up || !mouse_up)
-		obs_source_send_mouse_click(src, &ev, button, false, click_count);
-	if (!have_mouse_up || mouse_up)
-		obs_source_send_mouse_click(src, &ev, button, true, click_count);
+	if (mode != OBS_BROWSER_HID_RELEASE)
+		obs_source_send_mouse_click(src, &ev, button, false, clicks);
+	if (mode != OBS_BROWSER_HID_PRESS)
+		obs_source_send_mouse_click(src, &ev, button, true, clicks);
 
 	char src_log[256];
 	copy_logstr(src_log, sizeof(src_log), obs_source_get_name(src));
-	blog(LOG_INFO, "[obs-browser-hid] SendMouseClick %s%s at (%ld,%d) to '%s'",
-	     button == MOUSE_LEFT ? "left" : button == MOUSE_MIDDLE ? "middle" : "right",
-	     click_count > 1 ? " (multi)" : "", (long)ev.x, ev.y, src_log);
+	blog(LOG_INFO, "[obs-browser-hid] SendMouseClick %s%s at (%ld,%d) to '%s'", button_log,
+	     clicks > 1 ? " (multi)" : "", (long)ev.x, ev.y, src_log);
 
 	obs_source_release(src);
+	return true;
+}
+
+static void send_mouse_click_request(obs_data_t *request_data, obs_data_t *response_data, void *priv)
+{
+	UNUSED_PARAMETER(priv);
+
+	bool have_x = obs_data_has_user_value(request_data, "x");
+	bool have_y = obs_data_has_user_value(request_data, "y");
+	if (!have_x || !have_y) {
+		set_error(response_data, "Fields 'x' and 'y' are required");
+		return;
+	}
+
+	bool have_mouse_up = obs_data_has_user_value(request_data, "mouseUp");
+	bool mouse_up = obs_data_get_bool(request_data, "mouseUp");
+	int mode = !have_mouse_up ? OBS_BROWSER_HID_BOTH
+				  : (mouse_up ? OBS_BROWSER_HID_RELEASE : OBS_BROWSER_HID_PRESS);
+	bool no_move = obs_data_has_user_value(request_data, "noMove") &&
+		       obs_data_get_bool(request_data, "noMove");
+
+	char err[512];
+	if (!obs_browser_hid_send_mouse_click(
+		    obs_data_get_string(request_data, "sourceName"),
+		    obs_data_get_string(request_data, "sourceUuid"),
+		    obs_data_get_int(request_data, "x"), obs_data_get_int(request_data, "y"),
+		    obs_data_get_string(request_data, "button"),
+		    obs_data_get_int(request_data, "clickCount"),
+		    obs_data_get_string(request_data, "modifiers"), mode, no_move, err, sizeof(err)))
+		set_error(response_data, "%s", err);
 }
 
 /*
@@ -719,6 +781,10 @@ bool obs_module_load(void)
  *  register an obs-websocket vendor. */
 void obs_module_post_load(void)
 {
+	/* The dock does not depend on obs-websocket; register it first so the
+	 * direct (non-websocket) path is usable even if the vendor is not. */
+	obs_browser_hid_ui_init();
+
 	ws_vendor = obs_websocket_register_vendor(VENDOR_NAME);
 	if (!ws_vendor) {
 		blog(LOG_WARNING,
