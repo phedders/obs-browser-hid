@@ -223,14 +223,31 @@ from inside OBS without any websocket client:
   **name** and is either a **keyboard key** (key name, modifiers, optional
   text override, press/release mode) or a **mouse click** (x/y, button, click
   count, modifiers, press/release mode);
+- drag rows in the settings list to **reorder** the buttons, or use
+  Up/Down; **Import... / Export...** read/write a JSON action list
+  (same format as `settings.json`), with append-or-replace on import;
+- **Capture from interact window...** (mouse actions) temporarily closes the
+  dialog: click inside the source's open interact window and its click
+  position is filled into X/Y (press Esc to cancel, 30 s timeout). The click
+  is swallowed, so it does not reach the page; the status line reports the
+  source it was captured from;
+- each action also gets an OBS **frontend hotkey**. Bind keys under
+  **Settings → Hotkeys**; entries are listed as `Browser HID: <action name>`
+  and run against the currently selected dock target. Bindings are stored in
+  the active OBS profile and restored when the plugin registers the hotkeys;
+- the quick-action buttons are all sized to the widest label and packed into
+  as many columns as the dock width allows, so small docks fit more actions;
 - the dock shows one button per configured action; clicking it sends the
   input to the selected target and reports success or the plugin's error
   message at the bottom.
 
-Quick actions and the last selected target are stored in
+Quick actions (including their stable UUIDs, used for hotkey names) and the
+last selected target are stored in
 `<obs-config>/plugin_config/obs-browser-hid/settings.json`
-(`settings.json.bak` is kept as a backup on save). Input goes directly through
-libobs, so the dock works even when the obs-websocket server is disabled.
+(`settings.json.bak` is kept as a backup on save). Older settings files
+without UUIDs are upgraded and rewritten on first load. Input goes directly
+through libobs, so the dock works even when the obs-websocket server is
+disabled.
 
 ## Input hardening & threat model
 
@@ -320,6 +337,9 @@ in your obs-studio checkout for development runs.
 - The dock and settings dialog require a Qt OBS frontend (the normal desktop
   app); they are skipped in headless builds. The quick-action editor is
   English-only for now.
+- Action hotkeys are ordinary OBS frontend hotkeys, so they follow OBS's
+  normal hotkey focus/rerouting rules rather than being system-global
+  shortcuts. They are saved per profile.
 
 ## Files
 

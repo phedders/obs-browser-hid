@@ -208,13 +208,46 @@ Design points:
   exists.
 - **Settings persistence**: `settings.json` (and `.bak`) in the plugin's
   `plugin_config` directory via `obs_module_config_path()`, saved with
-  `obs_data_save_json_pretty_safe()`. The file holds an object array
-  (`name`, `type`, `key`, `modifiers`, `mode`, `text`, `x`, `y`, `button`,
-  `clickCount`) plus the last selected `target`. Values are sanitized on
-  load, so a corrupt/hand-edited file cannot create out-of-range actions.
+  `obs_data_save_json_pretty_safe()`. Each action carries a stable `uuid`
+  (plus `name`, `type`, `key`, `modifiers`, `mode`, `text`, `x`, `y`,
+  `button`, `clickCount`); the file also holds the last selected `target`.
+  Values are sanitized on load (including UUID normalization), so a
+  corrupt/hand-edited file cannot create out-of-range actions. Files from
+  before hotkeys existed have no UUIDs; the dock generates them once and
+  rewrites the file so the hotkey names stay stable.
 - **Editing model**: the settings dialog edits a copy and only commits on OK;
   the form applies changes to the selected action immediately (guarded by a
   `loading_` flag while fields are programmatically populated).
+- **Reorder/import/export**: the list uses `InternalMove` drag and drop and
+  an `ActionListWidget::dropEvent` hook mirrors the visual order back into
+  the action vector using the UUIDs stored in `Qt::UserRole`. Import/export
+  reuse the same serializer as `settings.json`; import can append (new/
+  duplicate UUIDs regenerated) or replace. Import goes through
+  `sanitize_action()`, so caps and defaults are the same as for normal load.
+- **Quick-action packing**: buttons are fixed to the widest label's size
+  hint and placed by a `QGridLayout` whose column count is recomputed from
+  the scroll viewport width (`relayout_actions()` on viewport resize), so
+  they shrink to text and fit several per row.
+- **Hotkeys**: every action gets
+  `obs_hotkey_register_frontend("obs-browser-hid.action.<uuid>", ...)`;
+  renames only call `obs_hotkey_set_description()`, so bindings survive.
+  Removed actions are unregistered. OBS only restores bindings for its own
+  frontend hotkeys, so the plugin reads the active profile's `[Hotkeys]`
+  entry (keyed by the hotkey name) and calls `obs_hotkey_load()` after
+  registering. Registration happens in `obs_module_post_load()`, before
+  `OBSBasic::CreateHotkeys()`. Callbacks are routed to the GUI thread by
+  OBSBasic; a thread check makes the fallback safe.
+- **Position capture**: the dialog's Capture button closes with a custom
+  result code; the dock then installs an application event filter and shows
+  a small non-modal instruction window, because the normal dialog is modal
+  and would block clicking the interact window. On a click over an interact
+  window's `preview` child, `obs_browser_hid_capture_interact_click()`
+  repeats `OBSBasicInteraction::GetSourceRelativeXY()` (device-pixel-ratio
+  scaling, then the aspect-fit centre/scale math from
+  `display-helpers.hpp`) to produce source-canvas pixels; the click is
+  swallowed, X/Y are injected into the pending action, and the dialog is
+  reopened with the same row selected. Esc or a 30 s timeout cancels and
+  reopens unchanged.
 - **Threading**: everything here runs on the Qt GUI thread; blocking CEF
   input calls are the same ones the frontend already makes. Because the dock
   calls the shared dispatch from that thread, the `interact` resolver must not
@@ -325,7 +358,7 @@ the client's frame cap.
 |------|---------|
 | `obs-browser-hid.c` | plugin entry point, vendor registration, `SendKey`/`SendText`/`SendMouseClick`, input dispatch, virtual-source resolution, hardening limits |
 | `obs-browser-hid.h` | shared C API used by the vendor handlers and the dock |
-| `obs-browser-hid-interact.cpp` | Qt helper: open interact window → browser source name |
+| `obs-browser-hid-interact.cpp` | Qt helper: open interact window → browser source name; global click → source-canvas coordinates |
 | `obs-browser-hid-ui.cpp` | "Browser HID" dock, source picker and quick-action settings dialog |
 | `obs-websocket-api.h` | obs-websocket vendor C API, vendored verbatim from the obs-studio tree |
 | `CMakeLists.txt` | standalone build (libobs, libobs-frontend-api, Qt6 Widgets, libxkbcommon) |
@@ -359,11 +392,11 @@ the client's frame cap.
 5. **Source discovery.** A small read-only request (e.g. `ListBrowserSources`)
    returning names/UUIDs and whether a source is in the program scene would
    make `ws-obs` scripts self-configuring.
-6. **Dock polish.** The quick actions are a flat list; drag-reorder,
-   import/export, per-action target overrides, a hotkey per action and
-   translated strings (needs AUTOMOC + `obs_frontend_push_ui_translation`)
-   are natural follow-ups. A "learn from interact window" button could
-   capture a click position directly instead of typing x/y.
+6. **Dock polish.** Remaining ideas: per-action target overrides, a small
+   hotkey editor inside the dialog (instead of sending users to Settings >
+   Hotkeys), translated strings (needs AUTOMOC +
+   `obs_frontend_push_ui_translation`), and capturing a position from any
+   OBS preview (not just an open interact window).
 
 ### Design constraints to preserve
 
