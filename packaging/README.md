@@ -29,16 +29,44 @@ see two copies of the module:
 sudo rm -f /usr/lib/<multiarch>/obs-modules/core/obs-browser-hid.so
 ```
 
+## Makefile quick reference
+
+```sh
+make build          # plugin + CLI
+make deb            # both .deb packages in dist/
+make source         # Debian source package in dist/
+make srpm           # SRPM in dist/
+make version NEW_VERSION=0.2.0
+make tag
+make push
+make release
+```
+
+`make build`/`make deb` use installed OBS 33 headers by default. For a source
+tree:
+
+```sh
+make build OBS_USE_SYSTEM_LIBS=OFF OBS_STUDIO_DIR=/path/to/obs-studio
+```
+
+`make release` requires a clean tree, an `origin` remote and an authenticated
+GitHub CLI (`gh auth login`). It builds the Debian and RPM artifacts, creates
+and pushes tag `vX.Y.Z`, then creates/updates the GitHub release with the
+`.deb` and `.src.rpm` files. Use `make remote URL=...` once to set `origin`.
+
 ## Version numbers
 
-Keep these in sync when releasing:
+`VERSION` is the single source of truth. CMake reads it (and generates the
+plugin manifest version from it), and:
 
-- `project(obs-browser-hid VERSION ...)` in `CMakeLists.txt`
-- `version` in `ws-obs-client/Cargo.toml`
-- `Version:` in `packaging/rpm/obs-browser-hid.spec`
-- the top entry in `debian/changelog`
+```sh
+make version NEW_VERSION=0.2.0
+```
 
-The plugin manifest is generated from the CMake project version.
+updates `VERSION`, `ws-obs-client/Cargo.toml`, `debian/changelog` (adds a new
+entry), `packaging/rpm/obs-browser-hid.spec` and the `ws-obs` man page.
+Review and commit the result before releasing. `make check-version` verifies
+that the files agree; release tags are `vX.Y.Z`.
 
 ## Debian / Ubuntu
 
@@ -60,8 +88,8 @@ dpkg-buildpackage -b -us -uc
 The `.deb` files are written to the parent directory, for example:
 
 ```
-../obs-browser-hid_1.0.0_amd64.deb
-../ws-obs_1.0.0_amd64.deb
+../obs-browser-hid_0.1.0_amd64.deb
+../ws-obs_0.1.0_amd64.deb
 ```
 
 By default the build uses the system OBS headers/libraries
@@ -94,21 +122,21 @@ packaging/rpm/make-srpm.sh
 This writes the spec and tarball under `packaging/rpm/rpmbuild/` and produces:
 
 ```
-packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm
+packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-0.1.0-*.src.rpm
 ```
 
 Build the binary RPMs from it:
 
 ```sh
 rpmbuild --define "_topdir $(pwd)/packaging/rpm/rpmbuild" \
-    --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm
+    --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-0.1.0-*.src.rpm
 ```
 
 If OBS is not installed as a development package, use a built obs-studio tree:
 
 ```sh
 rpmbuild --define "_topdir $(pwd)/packaging/rpm/rpmbuild" \
-    --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm \
+    --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-0.1.0-*.src.rpm \
     --define 'obs_studio_dir /path/to/obs-studio'
 ```
 
@@ -116,8 +144,8 @@ The resulting RPMs are written under
 `packaging/rpm/rpmbuild/RPMS/<arch>/`:
 
 ```
-obs-browser-hid-1.0.0-*.rpm
-ws-obs-1.0.0-*.rpm
+obs-browser-hid-0.1.0-*.rpm
+ws-obs-0.1.0-*.rpm
 ```
 
 Notes:

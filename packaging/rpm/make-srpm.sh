@@ -3,7 +3,7 @@
 # binary RPMs). Run from anywhere inside the git checkout.
 #
 #   packaging/rpm/make-srpm.sh
-#   rpmbuild --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-1.0.0-*.src.rpm
+#   rpmbuild --rebuild packaging/rpm/rpmbuild/SRPMS/obs-browser-hid-0.1.0-*.src.rpm
 #
 # If OBS 33 development files are not installed system-wide, rebuild against
 # an existing obs-studio build tree:
@@ -20,8 +20,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 name=obs-browser-hid
 spec="$root/packaging/rpm/$name.spec"
 
-if ! command -v rpmbuild >/dev/null 2>&1; then
-    echo "rpmbuild is required (install rpm-build or rpmdevtools)" >&2
+if ! command -v "${RPMBUILD:-rpmbuild}" >/dev/null 2>&1; then
+    echo "rpmbuild is required (install rpm-build or rpmdevtools), or set RPMBUILD" >&2
     exit 1
 fi
 
@@ -44,11 +44,13 @@ topdir=${RPM_TOPDIR:-"$root/packaging/rpm/rpmbuild"}
 mkdir -p "$topdir/BUILD" "$topdir/BUILDROOT" "$topdir/RPMS" \
          "$topdir/SOURCES" "$topdir/SPECS" "$topdir/SRPMS"
 
+rpmbuild_bin=${RPMBUILD:-rpmbuild}
+
 git -C "$root" archive --format=tar.gz --prefix="$name-$version/" \
     -o "$topdir/SOURCES/$name-$version.tar.gz" HEAD
 cp "$spec" "$topdir/SPECS/"
 
-rpmbuild --define "_topdir $topdir" -bs "$topdir/SPECS/$name.spec"
+"$rpmbuild_bin" --define "_topdir $topdir" -bs "$topdir/SPECS/$name.spec"
 
 echo
 echo "SRPM(s):"

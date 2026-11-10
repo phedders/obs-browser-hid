@@ -16,7 +16,7 @@ OBS_CMAKE_ARGS = \
 endif
 
 %:
-	dh $@
+	dh $@ --buildsystem=cmake
 
 override_dh_auto_configure:
 	dh_auto_configure -- \

@@ -1,5 +1,6 @@
 # Build output
 /build/
+/dist/
 /ws-obs
 /ws-obs-client/target/
 /obj-*/

@@ -1,5 +1,5 @@
 Name:           obs-browser-hid
-Version:        1.0.0
+Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Browser source input bridge for OBS Studio
 License:        GPL-2.0-or-later
@@ -72,5 +72,5 @@ install -D -m 0644 packaging/ws-obs.1 %{buildroot}%{_mandir}/man1/ws-obs.1
 %{_mandir}/man1/ws-obs.1*
 
 %changelog
-* Tue Nov 10 2026 Paul Hedderly <paul+github@.mjr.org> - 1.0.0-1
+* Tue Nov 10 2026 Paul Hedderly <paul+github@.mjr.org> - 0.1.0-1
 - Initial RPM packaging.

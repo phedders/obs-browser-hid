@@ -333,8 +333,15 @@ Against `tests/fake-obs-ws.py` (and `tests/fake-huge.py` for the frame cap):
 ### Plugin
 
 ```sh
+make build                    # plugin + CLI, installed OBS 33 headers
+# or against a source tree:
+make build OBS_USE_SYSTEM_LIBS=OFF OBS_STUDIO_DIR=/home/prh/gits/obs-studio
+```
+
+Direct CMake equivalent:
+
+```sh
 cd obs-browser-hid
-# against installed OBS 33, or against the source tree:
 cmake -B build -S . -DOBS_USE_SYSTEM_LIBS=ON
 cmake --build build
 sudo cmake --install build --prefix /usr
@@ -387,11 +394,15 @@ the client's frame cap.
 | `obs-browser-hid-interact.cpp` | Qt helper: open interact window → browser source name; global click → source-canvas coordinates |
 | `obs-browser-hid-ui.cpp` | "Browser HID" dock, source picker and quick-action settings dialog |
 | `obs-websocket-api.h` | obs-websocket vendor C API, vendored verbatim from the obs-studio tree |
-| `manifest.json.in` | OBS 33 plugin manifest template (version from CMake) |
+| `VERSION` | single source of truth for the project version (`0.1.0`) |
+| `manifest.json.in` | OBS 33 plugin manifest template (version from VERSION) |
 | `CMakeLists.txt` | standalone build (OBS tree or installed libobs, Qt6 Widgets, libxkbcommon) |
+| `Makefile` | build, package, tag/push and GitHub-release targets |
+| `scripts/` | version sync/check helpers used by the Makefile |
 | `debian/` | Debian packaging for the plugin and `ws-obs` |
 | `packaging/rpm/` | RPM spec, SRPM helper and shared man page |
 | `packaging/README.md` | package build instructions |
+| `dist/` | build/package output (git-ignored) |
 | `ws-obs-client/src/main.rs` | Rust CLI: arg parsing, payload building, v5 protocol handshake/auth, hardening |
 | `ws-obs` | built CLI binary (local artifact, git-ignored) |
 | `build/obs-browser-hid.so` | built plugin (local artifact, git-ignored) |
@@ -462,12 +473,21 @@ Two binary packages are produced from this tree:
   `<datadir>/obs/obs-modules/plugins/obs-browser-hid/manifest.json`;
 - `ws-obs` installs `/usr/bin/ws-obs` and its man page.
 
-Debian files live in `debian/` (`dpkg-buildpackage -b -us -uc`); the RPM spec
-and `make-srpm.sh` live in `packaging/rpm/`. `packaging/README.md` documents
-the prerequisites (including using an installed OBS 33 or an already-built
-source tree) and build commands. Keep the version in `CMakeLists.txt`,
-`ws-obs-client/Cargo.toml`, the RPM spec and `debian/changelog` in sync; the
-manifest version is generated from the CMake project version.
+Debian files live in `debian/` (`make deb`); the RPM spec and `make-srpm.sh`
+live in `packaging/rpm/` (`make srpm`). `packaging/README.md` documents the
+prerequisites (including using an installed OBS 33 or an already-built
+source tree) and build commands.
+
+`VERSION` is the single source of truth. `make version NEW_VERSION=x.y.z`
+updates `VERSION`, `ws-obs-client/Cargo.toml`, `debian/changelog` (new
+entry), the RPM spec and the `ws-obs` man page; CMake reads `VERSION` and
+generates the plugin manifest version. `make check-version` verifies the
+files agree. Release tags are `vX.Y.Z`.
+
+`make release` builds both formats, creates/pushes the tag, and publishes a
+GitHub release with the `.deb` and `.src.rpm` assets using `gh`; it requires
+a clean tree, an `origin` remote and `gh auth login`. `make remote URL=...`
+sets `origin`; `make push` only pushes HEAD and the tag.
 
 RPM automatic dependency generation will require the OBS shared libraries;
 OBS must satisfy those dependencies (normally the distro `obs-studio`

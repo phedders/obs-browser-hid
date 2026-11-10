@@ -310,9 +310,20 @@ Residual risks worth knowing:
 
 ## Build & install
 
-Build against an installed OBS 33 (headers under `/usr/include/obs` and the
-normal libraries) or against a built obs-studio source tree (default
-`/home/prh/gits/obs-studio`, overridable with `-DOBS_STUDIO_DIR=...`).
+The shortest path:
+
+```sh
+make build              # plugin + ws-obs (installed OBS 33)
+make deb                # two .deb packages in dist/
+make srpm               # SRPM in dist/
+make release            # build + tag + push + GitHub release
+```
+
+`make` uses the installed OBS 33 headers/libraries by default. Use
+`OBS_USE_SYSTEM_LIBS=OFF OBS_STUDIO_DIR=/path/to/obs-studio` to build against
+a local obs-studio checkout.
+
+Or invoke CMake directly:
 
 ```sh
 # against installed OBS 33
@@ -334,7 +345,9 @@ OBS 33 loads third-party modules from `obs-modules/plugins` (the old
 `build/rundir/RelWithDebInfo/lib/x86_64-linux-gnu/obs-modules/plugins/`.
 
 Ready-made `.deb` and RPM packaging (separate plugin and `ws-obs` packages)
-is documented in [`packaging/README.md`](packaging/README.md).
+is documented in [`packaging/README.md`](packaging/README.md). Versions are
+driven by the `VERSION` file (`0.1.0`); use `make version NEW_VERSION=...`
+to bump all files.
 
 ## Limitations / caveats
 

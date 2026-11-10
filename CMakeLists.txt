@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
-project(obs-browser-hid VERSION 1.0.0 LANGUAGES C CXX)
+
+# One version for the whole project: the VERSION file (maintained by
+# `make version NEW_VERSION=x.y.z`).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" OBS_BROWSER_HID_VERSION LIMIT_COUNT 1)
+string(STRIP "${OBS_BROWSER_HID_VERSION}" OBS_BROWSER_HID_VERSION)
+if(NOT OBS_BROWSER_HID_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR
+        "VERSION must contain a semver such as 0.1.0 (got '${OBS_BROWSER_HID_VERSION}')")
+endif()
+
+project(obs-browser-hid VERSION ${OBS_BROWSER_HID_VERSION} LANGUAGES C CXX)
 
 # ---------------------------------------------------------------------------
 # obs-browser-hid
