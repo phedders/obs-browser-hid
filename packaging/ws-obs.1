@@ -1,0 +1,105 @@
+.TH WS-OBS 1 "2026-11-10" "ws-obs 1.0.0" "User Commands"
+.SH NAME
+ws-obs \- send OBS obs-websocket vendor requests, including browser-source input
+.SH SYNOPSIS
+.B ws-obs
+[\fB\-\-url\fR \fIws://host:port\fR] [\fB\-\-password\fR \fIpass\fR]
+\fIvendor\fR \fIsource\fR [\fItokens\fR...]
+.br
+.B ws-obs
+[\fB\-\-url\fR \fIws://host:port\fR] [\fB\-\-password\fR \fIpass\fR]
+.B call
+\fIvendor\fR \fIrequestType\fR [\fIrequestData-json\fR]
+.SH DESCRIPTION
+.B ws-obs
+is a small obs-websocket v5 client. In the first form it speaks the
+.B obs-browser-hid
+vendor to send keyboard keys, text or mouse clicks to a named browser
+source (or to the virtual sources
+.B current
+and
+.BR interact ).
+The second form sends an arbitrary
+.B CallVendorRequest
+to any obs-websocket vendor.
+.SH OPTIONS
+.TP
+.BI \-\-url " ws://host:port"
+WebSocket endpoint. Defaults to
+.BR ws://127.0.0.1:4455 .
+.TP
+.BI \-\-password " pass"
+obs-websocket password, if authentication is required (flag or
+.BR OBS_WS_PASSWORD ).
+.SH TOKENS
+.TP
+.BI key
+A key name (for example
+.BR Return ,
+.BR Escape ,
+.BR F5 ,
+.BR a ,
+.BR Left ,
+.BR space ).
+.TP
+.B Ctrl, Shift, Alt, Super, AltGr, NumLock, CapsLock
+Modifier tokens before the key.
+.TP
+.BI \-\-up " key"
+Send only the key release.
+.TP
+.BI \-\-down " key"
+Send only the key press.
+.TP
+.BI \-\-text " string"
+Type a whole string with the
+.B SendText
+request instead of keys.
+.TP
+.BI click " x y"
+Left click at source-canvas position x,y.
+.TP
+.BI right-click " x y"
+Right click.
+.TP
+.BI middle-click " x y"
+Middle click.
+.TP
+.BI double-click " x y"
+Left double click.
+.SH ENVIRONMENT
+.TP
+.B OBS_WS_URL
+Default WebSocket URL.
+.TP
+.B OBS_WS_PASSWORD
+Default obs-websocket password.
+.TP
+.B WSOBS_DEBUG
+If set to a non-empty value, print raw response JSON to stderr.
+.SH EXAMPLES
+.TP
+.B ws-obs obs-browser-hid current Return
+Press and release Return on the first browser source in the program scene.
+.TP
+.B ws-obs obs-browser-hid interact ctrl c
+Send Ctrl+C to the browser source whose interact window is open.
+.TP
+.B ws-obs obs-browser-hid browsersource2 double-click 120 80
+Double-click at (120,80) in the source canvas.
+.TP
+.B ws-obs call vendor-foo DoThing '{"arg":1}'
+Send a generic vendor request.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Connection, request or plugin error.
+.TP
+.B 2
+Usage error (bad arguments, URL, password or oversized input).
+.SH SEE ALSO
+.BR obs (1)
+and the obs-websocket protocol documentation.

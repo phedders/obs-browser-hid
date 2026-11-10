@@ -1,0 +1,4 @@
+# The self-built obs-studio package does not ship shlibs/symbols files, so
+# tell dpkg-shlibdeps where libobs and the frontend API come from.
+libobs 30 obs-studio (>= 33.0.1)
+libobs-frontend-api 30 obs-studio (>= 33.0.1)

@@ -1,0 +1,43 @@
+#!/usr/bin/make -f
+
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
+# Default to the installed OBS 33 headers/libraries. Set
+# OBS_USE_SYSTEM_LIBS=OFF and OBS_STUDIO_DIR=/path/to/obs-studio to build
+# against an already-built obs-studio source tree instead.
+OBS_USE_SYSTEM_LIBS ?= ON
+ifeq ($(OBS_USE_SYSTEM_LIBS),ON)
+OBS_CMAKE_ARGS = -DOBS_USE_SYSTEM_LIBS=ON
+else
+OBS_STUDIO_DIR ?= /home/prh/gits/obs-studio
+OBS_CMAKE_ARGS = \
+	-DOBS_STUDIO_DIR=$(OBS_STUDIO_DIR) \
+	-DOBS_BUILD_DIR=$(OBS_STUDIO_DIR)/build
+endif
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		$(OBS_CMAKE_ARGS) \
+		-DOBS_PLUGIN_INSTALL_DIR=lib/$(DEB_HOST_MULTIARCH)/obs-modules/plugins
+
+override_dh_auto_build:
+	dh_auto_build
+	cd ws-obs-client && cargo build --release --locked
+
+override_dh_auto_install:
+	dh_auto_install
+	install -D -m 0755 ws-obs-client/target/release/ws-obs \
+		debian/tmp/usr/bin/ws-obs
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf ws-obs-client/target
+
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
+
+override_dh_missing:
+	dh_missing --fail-missing

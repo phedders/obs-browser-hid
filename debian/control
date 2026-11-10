@@ -1,0 +1,39 @@
+Source: obs-browser-hid
+Section: video
+Priority: optional
+Maintainer: Paul Hedderly <paul+github@.mjr.org>
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake,
+ pkg-config,
+ libxkbcommon-dev,
+ qt6-base-dev,
+ cargo,
+ rustc,
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+
+Package: obs-browser-hid
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: browser source input bridge for OBS Studio
+ Adds obs-websocket vendor requests and an in-OBS dock that send
+ synthetic keyboard, text and mouse input to named browser sources.
+ .
+ Quick actions are configurable in the dock, can be bound to OBS
+ frontend hotkeys, imported/exported, and can capture click positions
+ from the source's interact window.
+ .
+ The module is installed in the OBS 33+ third-party plugin location
+ (/usr/lib/<multiarch>/obs-modules/plugins).
+
+Package: ws-obs
+Architecture: any
+Section: utils
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: obs-browser-hid
+Description: command-line client for OBS obs-websocket vendor requests
+ A small WebSocket client for OBS obs-websocket v5. It supports the
+ obs-browser-hid vendor (keys, text, mouse clicks and the virtual
+ sources "current" and "interact") as well as generic
+ CallVendorRequest calls.

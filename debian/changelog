@@ -1,0 +1,9 @@
+obs-browser-hid (1.0.0) unstable; urgency=medium
+
+  * Initial Debian packaging.
+    - obs-browser-hid: OBS plugin installed in the OBS 33+ third-party
+      plugin path (/usr/lib/<multiarch>/obs-modules/plugins), with its
+      manifest under /usr/share/obs/obs-modules/plugins/obs-browser-hid.
+    - ws-obs: command-line client for the vendor requests.
+
+ -- Paul Hedderly <paul+github@.mjr.org>  Tue, 10 Nov 2026 12:00:00 +0000

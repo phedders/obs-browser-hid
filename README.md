@@ -310,18 +310,31 @@ Residual risks worth knowing:
 
 ## Build & install
 
-Requires the obs-studio source tree checked out & built at
-`/home/prh/gits/obs-studio` (overridable, see CMakeLists.txt).
+Build against an installed OBS 33 (headers under `/usr/include/obs` and the
+normal libraries) or against a built obs-studio source tree (default
+`/home/prh/gits/obs-studio`, overridable with `-DOBS_STUDIO_DIR=...`).
 
 ```sh
-cmake -B build -S .
+# against installed OBS 33
+cmake -B build -S . -DOBS_USE_SYSTEM_LIBS=ON
 cmake --build build
-sudo cmake --install build --prefix /   # -> /usr/lib/x86_64-linux-gnu/obs-modules/core/
+sudo cmake --install build --prefix /usr
+# -> /usr/lib/<libdir>/obs-modules/plugins/obs-browser-hid.so
+# -> /usr/share/obs/obs-modules/plugins/obs-browser-hid/manifest.json
+
+# or against an obs-studio source tree
+cmake -B build -S . -DOBS_STUDIO_DIR=/home/prh/gits/obs-studio
+cmake --build build
+sudo cmake --install build --prefix /usr
 ```
 
-or drop `build/obs-browser-hid.so` into
-`build/rundir/RelWithDebInfo/lib/x86_64-linux-gnu/obs-modules/core/`
-in your obs-studio checkout for development runs.
+OBS 33 loads third-party modules from `obs-modules/plugins` (the old
+`obs-modules/core` is for OBS's own modules). For development runs, drop
+`build/obs-browser-hid.so` into the rundir's third-party directory:
+`build/rundir/RelWithDebInfo/lib/x86_64-linux-gnu/obs-modules/plugins/`.
+
+Ready-made `.deb` and RPM packaging (separate plugin and `ws-obs` packages)
+is documented in [`packaging/README.md`](packaging/README.md).
 
 ## Limitations / caveats
 

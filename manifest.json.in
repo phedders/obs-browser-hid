@@ -1,0 +1,15 @@
+{
+    "display_name": "Browser HID",
+    "id": "obs-browser-hid",
+    "version": "@PROJECT_VERSION@",
+    "name": "obs-browser-hid",
+    "description": "Send keyboard, text and mouse input to OBS browser sources.",
+    "long_description": "Adds obs-websocket vendor requests and an OBS dock for sending synthetic keyboard, text and mouse input to browser sources, with configurable quick actions, hotkeys and an interact-window position picker.",
+    "urls": {
+        "repository": "",
+        "website": "",
+        "support": ""
+    },
+    "has_banner": false,
+    "has_icon": false
+}

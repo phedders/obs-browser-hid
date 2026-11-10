@@ -2,6 +2,21 @@
 /build/
 /ws-obs
 /ws-obs-client/target/
+/obj-*/
+
+# Debian packaging output
+/debian/.debhelper/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/*.debhelper
+/debian/*.debhelper.log
+/debian/*.substvars
+/debian/obs-browser-hid/
+/debian/ws-obs/
+/debian/tmp/
+
+# RPM packaging output
+/packaging/rpm/rpmbuild/
 
 # Editor/OS noise
 *.o

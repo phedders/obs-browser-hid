@@ -334,15 +334,23 @@ Against `tests/fake-obs-ws.py` (and `tests/fake-huge.py` for the frame cap):
 
 ```sh
 cd obs-browser-hid
-cmake -B build -S .          # points at /home/prh/gits/obs-studio (see CMakeLists.txt)
+# against installed OBS 33, or against the source tree:
+cmake -B build -S . -DOBS_USE_SYSTEM_LIBS=ON
 cmake --build build
-sudo cmake --install build --prefix /   # -> /usr/lib/x86_64-linux-gnu/obs-modules/core/
+sudo cmake --install build --prefix /usr
+# -> /usr/lib/<libdir>/obs-modules/plugins/obs-browser-hid.so
+# -> /usr/share/obs/obs-modules/plugins/obs-browser-hid/manifest.json
 ```
 
 For dev runs against the checkout's rundir, copy
 `build/obs-browser-hid.so` to
-`<obs-build>/rundir/RelWithDebInfo/lib/x86_64-linux-gnu/obs-modules/core/`.
+`<obs-build>/rundir/RelWithDebInfo/lib/x86_64-linux-gnu/obs-modules/plugins/`.
 A full OBS restart is required after replacing the module.
+
+The plugin is installed in OBS 33's **third-party** module directory
+(`obs-modules/plugins`), not the core directory (`obs-modules/core`). The
+generated `manifest.json` goes in the matching data directory
+(`share/obs/obs-modules/plugins/obs-browser-hid/`).
 
 ### CLI
 
@@ -379,7 +387,11 @@ the client's frame cap.
 | `obs-browser-hid-interact.cpp` | Qt helper: open interact window → browser source name; global click → source-canvas coordinates |
 | `obs-browser-hid-ui.cpp` | "Browser HID" dock, source picker and quick-action settings dialog |
 | `obs-websocket-api.h` | obs-websocket vendor C API, vendored verbatim from the obs-studio tree |
-| `CMakeLists.txt` | standalone build (libobs, libobs-frontend-api, Qt6 Widgets, libxkbcommon) |
+| `manifest.json.in` | OBS 33 plugin manifest template (version from CMake) |
+| `CMakeLists.txt` | standalone build (OBS tree or installed libobs, Qt6 Widgets, libxkbcommon) |
+| `debian/` | Debian packaging for the plugin and `ws-obs` |
+| `packaging/rpm/` | RPM spec, SRPM helper and shared man page |
+| `packaging/README.md` | package build instructions |
 | `ws-obs-client/src/main.rs` | Rust CLI: arg parsing, payload building, v5 protocol handshake/auth, hardening |
 | `ws-obs` | built CLI binary (local artifact, git-ignored) |
 | `build/obs-browser-hid.so` | built plugin (local artifact, git-ignored) |
@@ -443,12 +455,23 @@ the client's frame cap.
 
 ### Packaging
 
-The `.deb` installs modules to
-`/usr/lib/x86_64-linux-gnu/obs-modules/core/`. Bundle the CLI under
-`/usr/bin/ws-obs` and document that `OBS_WS_PASSWORD` is the recommended way to
-pass credentials (flags are visible in `ps`). If the plugin should be optional,
-add a config checkbox read via `obs_frontend_get_global_config()` and skip
-vendor registration when disabled.
+Two binary packages are produced from this tree:
+
+- `obs-browser-hid` installs the module in OBS 33's third-party location
+  (`<libdir>/obs-modules/plugins/obs-browser-hid.so`) plus
+  `<datadir>/obs/obs-modules/plugins/obs-browser-hid/manifest.json`;
+- `ws-obs` installs `/usr/bin/ws-obs` and its man page.
+
+Debian files live in `debian/` (`dpkg-buildpackage -b -us -uc`); the RPM spec
+and `make-srpm.sh` live in `packaging/rpm/`. `packaging/README.md` documents
+the prerequisites (including using an installed OBS 33 or an already-built
+source tree) and build commands. Keep the version in `CMakeLists.txt`,
+`ws-obs-client/Cargo.toml`, the RPM spec and `debian/changelog` in sync; the
+manifest version is generated from the CMake project version.
+
+RPM automatic dependency generation will require the OBS shared libraries;
+OBS must satisfy those dependencies (normally the distro `obs-studio`
+package). The CLI is independent of the plugin and only recommends it.
 
 ### Known upstream quirks (don't relearn these)
 
