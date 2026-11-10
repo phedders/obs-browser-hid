@@ -2,6 +2,7 @@ tar-ignore = build
 tar-ignore = obj-*
 tar-ignore = ws-obs
 tar-ignore = ws-obs-client/target
+tar-ignore = packaging/rpm/rpmbuild
 tar-ignore = packaging/rpm/BUILD
 tar-ignore = packaging/rpm/BUILDROOT
 tar-ignore = packaging/rpm/RPMS
