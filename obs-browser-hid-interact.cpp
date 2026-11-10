@@ -92,28 +92,28 @@ static QString interact_title_source_name(QWidget *w, const QString &prefix)
 			return name;
 	}
 
-	/* Locale fallback: no known prefix -> look for a browser source whose
-	 * name is the title's suffix. */
-	struct suffix_ctx {
+	/* Locale fallback: patterns where %1 is not at the end (quoted or
+	 * wrapped in translated text) still contain the source name. Pick
+	 * the longest browser-source name found in the title. */
+	struct name_ctx {
 		QString title;
 		QString match;
-	} sctx{title, QString{}};
+	} nctx{title, QString{}};
 	auto cb = [](void *p, obs_source_t *src) -> bool {
-		auto *c = static_cast<struct suffix_ctx *>(p);
+		auto *c = static_cast<struct name_ctx *>(p);
 		if (!is_browser_source_id(src))
 			return true;
 		const char *src_name = obs_source_get_name(src);
 		if (!src_name)
 			return true;
-		QString name = QString::fromUtf8(src_name);
-		if (!name.isEmpty() && c->title.endsWith(name)) {
+		const QString name = QString::fromUtf8(src_name);
+		if (!name.isEmpty() && c->title.contains(name) &&
+		    name.size() > c->match.size())
 			c->match = name;
-			return false;
-		}
 		return true;
 	};
-	obs_enum_sources(cb, &sctx);
-	return sctx.match;
+	obs_enum_sources(cb, &nctx);
+	return nctx.match;
 }
 
 /** Must be called from the Qt GUI thread. */
@@ -220,22 +220,115 @@ static void scale_and_center(int baseCX, int baseCY, int windowCX, int windowCY,
 	*y = windowCY / 2 - newCY / 2;
 }
 
-extern "C" bool obs_browser_hid_capture_interact_click(int global_x, int global_y, int *rel_x,
-						       int *rel_y, char *source_name,
+/** Maps a point in `preview`'s local coordinates to source-canvas pixels and
+ *  fills the outputs. Must be called from the Qt GUI thread. */
+static bool map_preview_point(QWidget *dialog, QWidget *preview, const QPoint &local,
+			      int *rel_x, int *rel_y, char *source_name,
+			      size_t source_name_size)
+{
+	const QString name = interact_title_source_name(dialog, interaction_title_prefix());
+	if (name.isEmpty()) {
+		blog(LOG_DEBUG,
+		     "[obs-browser-hid-interact] could not resolve the source from interact title '%s'",
+		     qUtf8Printable(log_safe(dialog->windowTitle())));
+		return false;
+	}
+
+	obs_source_t *src = obs_get_source_by_name(name.toUtf8().constData());
+	if (!src || !is_browser_source_id(src)) {
+		blog(LOG_WARNING,
+		     "[obs-browser-hid-interact] interact title resolved to '%s' but no browser source has that name",
+		     qUtf8Printable(log_safe(name)));
+		obs_source_release(src);
+		return false;
+	}
+	uint32_t sourceCX = obs_source_get_width(src);
+	uint32_t sourceCY = obs_source_get_height(src);
+	obs_source_release(src);
+	if (!sourceCX)
+		sourceCX = 1;
+	if (!sourceCY)
+		sourceCY = 1;
+
+	const QSize size = preview->size() * preview->devicePixelRatioF();
+	if (size.width() <= 0 || size.height() <= 0)
+		return false;
+
+	/* obs-browser coordinates are pixels of the (unscaled) source canvas;
+	 * OBS scales the widget coordinate by the device pixel ratio first,
+	 * then un-does the aspect-fit transform. */
+	const float dpr = float(dialog->devicePixelRatioF());
+	const int mouseX = int(roundf(local.x() * dpr));
+	const int mouseY = int(roundf(local.y() * dpr));
+
+	int offX, offY;
+	float scale;
+	scale_and_center(int(sourceCX), int(sourceCY), size.width(), size.height(), &offX,
+			 &offY, &scale);
+
+	int x, y;
+	if (offX > 0) {
+		x = int(float(mouseX - offX) / scale);
+		y = int(float(mouseY) / scale);
+	} else {
+		x = int(float(mouseX) / scale);
+		y = int(float(mouseY - offY) / scale);
+	}
+
+	if (x < 0 || x > int(sourceCX) || y < 0 || y > int(sourceCY))
+		return false;
+
+	if (rel_x)
+		*rel_x = x;
+	if (rel_y)
+		*rel_y = y;
+	if (source_name && source_name_size)
+		snprintf(source_name, source_name_size, "%s", name.toUtf8().constData());
+	return true;
+}
+
+extern "C" bool obs_browser_hid_capture_interact_click(void *watched_widget, int x, int y,
+						       int *rel_x, int *rel_y,
+						       char *source_name,
 						       size_t source_name_size)
 {
 	QCoreApplication *app = QCoreApplication::instance();
 	if (!app || QThread::currentThread() != app->thread())
 		return false;
 
-	const QString prefix = interaction_title_prefix();
-	const QPoint global(global_x, global_y);
+	/* Preferred path: the event filter knows the widget that received the
+	 * mouse event and the event's local position. This avoids global
+	 * cursor coordinates (unreliable on Wayland) entirely. */
+	if (watched_widget) {
+		auto *watched = static_cast<QWidget *>(watched_widget);
 
+		QWidget *dialog = nullptr;
+		for (QWidget *w = watched; w; w = w->parentWidget()) {
+			if (w->inherits("OBSBasicInteraction")) {
+				dialog = w;
+				break;
+			}
+		}
+		if (!dialog)
+			return false;
+
+		QWidget *preview = dialog->findChild<QWidget *>("preview");
+		if (!preview || !preview->isVisible())
+			return false;
+
+		const QPoint local = preview->mapFrom(watched, QPoint(x, y));
+		if (!preview->rect().contains(local))
+			return false;
+		return map_preview_point(dialog, preview, local, rel_x, rel_y, source_name,
+					 source_name_size);
+	}
+
+	/* Fallback: (x, y) are global screen coordinates. */
+	const QPoint global(x, y);
 	for (QWidget *w : QApplication::allWidgets()) {
 		if (!w->isWindow() || !w->isVisible() || !w->inherits("OBSBasicInteraction"))
 			continue;
 
-		/* ui->preview is the OBSQTDisplay that shows this source. */
 		QWidget *preview = w->findChild<QWidget *>("preview");
 		if (!preview || !preview->isVisible())
 			continue;
@@ -243,59 +336,9 @@ extern "C" bool obs_browser_hid_capture_interact_click(int global_x, int global_
 		const QPoint local = preview->mapFromGlobal(global);
 		if (!preview->rect().contains(local))
 			continue;
-
-		const QString name = interact_title_source_name(w, prefix);
-		if (name.isEmpty())
-			continue;
-
-		obs_source_t *src = obs_get_source_by_name(name.toUtf8().constData());
-		if (!src || !is_browser_source_id(src)) {
-			obs_source_release(src);
-			continue;
-		}
-		uint32_t sourceCX = obs_source_get_width(src);
-		uint32_t sourceCY = obs_source_get_height(src);
-		obs_source_release(src);
-		if (!sourceCX)
-			sourceCX = 1;
-		if (!sourceCY)
-			sourceCY = 1;
-
-		const QSize size = preview->size() * preview->devicePixelRatioF();
-		if (size.width() <= 0 || size.height() <= 0)
-			continue;
-
-		/* obs-browser coordinates are pixels of the (unscaled) source
-		 * canvas; OBS scales the widget coordinate by the device
-		 * pixel ratio first, then un-does the aspect-fit transform. */
-		const float dpr = float(w->devicePixelRatioF());
-		const int mouseX = int(roundf(local.x() * dpr));
-		const int mouseY = int(roundf(local.y() * dpr));
-
-		int offX, offY;
-		float scale;
-		scale_and_center(int(sourceCX), int(sourceCY), size.width(), size.height(), &offX,
-				 &offY, &scale);
-
-		int x, y;
-		if (offX > 0) {
-			x = int(float(mouseX - offX) / scale);
-			y = int(float(mouseY) / scale);
-		} else {
-			x = int(float(mouseX) / scale);
-			y = int(float(mouseY - offY) / scale);
-		}
-
-		if (x < 0 || x > int(sourceCX) || y < 0 || y > int(sourceCY))
-			continue;
-
-		if (rel_x)
-			*rel_x = x;
-		if (rel_y)
-			*rel_y = y;
-		if (source_name && source_name_size)
-			snprintf(source_name, source_name_size, "%s", name.toUtf8().constData());
-		return true;
+		if (map_preview_point(w, preview, local, rel_x, rel_y, source_name,
+				      source_name_size))
+			return true;
 	}
 
 	return false;

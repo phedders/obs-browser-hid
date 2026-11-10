@@ -52,13 +52,17 @@ void obs_browser_hid_ui_init(void);
 char *obs_browser_hid_interact_source_name(void);
 
 /**
- * Maps a global screen position over a visible interact window back to the
- * source-canvas coordinate shown in it. Must be called on the Qt GUI thread.
- * Returns false when the point is not over an interact window's preview (or
- * its source cannot be resolved). `source_name` receives the source name.
+ * Maps a mouse event in an interact window back to the source-canvas
+ * coordinate shown in it. Pass the QWidget that received the event and the
+ * event's local position in `watched_widget`/`local_x`/`local_y`. Passing a
+ * NULL widget treats the coordinates as global screen positions (fallback).
+ * Must be called on the Qt GUI thread. Returns false when the point is not
+ * over an interact window's preview (or its source cannot be resolved).
+ * `source_name` receives the source name.
  */
-bool obs_browser_hid_capture_interact_click(int global_x, int global_y, int *rel_x, int *rel_y,
-					    char *source_name, size_t source_name_size);
+bool obs_browser_hid_capture_interact_click(void *watched_widget, int local_x, int local_y,
+					    int *rel_x, int *rel_y, char *source_name,
+					    size_t source_name_size);
 
 #ifdef __cplusplus
 }

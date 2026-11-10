@@ -215,9 +215,11 @@ Design points:
   corrupt/hand-edited file cannot create out-of-range actions. Files from
   before hotkeys existed have no UUIDs; the dock generates them once and
   rewrites the file so the hotkey names stay stable.
-- **Editing model**: the settings dialog edits a copy and only commits on OK;
-  the form applies changes to the selected action immediately (guarded by a
-  `loading_` flag while fields are programmatically populated).
+- **Editing model**: the settings window is **modeless** (a heap dialog shown
+  with `show()`, one instance tracked by the dock), so OBS and interact
+  windows stay usable while it is open; it edits a copy and only commits on
+  OK. The form applies changes to the selected action immediately (guarded
+  by a `loading_` flag while fields are programmatically populated).
 - **Reorder/import/export**: the list uses `InternalMove` drag and drop and
   an `ActionListWidget::dropEvent` hook mirrors the visual order back into
   the action vector using the UUIDs stored in `Qt::UserRole`. Import/export
@@ -237,17 +239,19 @@ Design points:
   registering. Registration happens in `obs_module_post_load()`, before
   `OBSBasic::CreateHotkeys()`. Callbacks are routed to the GUI thread by
   OBSBasic; a thread check makes the fallback safe.
-- **Position capture**: the dialog's Capture button closes with a custom
-  result code; the dock then installs an application event filter and shows
-  a small non-modal instruction window, because the normal dialog is modal
-  and would block clicking the interact window. On a click over an interact
-  window's `preview` child, `obs_browser_hid_capture_interact_click()`
-  repeats `OBSBasicInteraction::GetSourceRelativeXY()` (device-pixel-ratio
-  scaling, then the aspect-fit centre/scale math from
-  `display-helpers.hpp`) to produce source-canvas pixels; the click is
-  swallowed, X/Y are injected into the pending action, and the dialog is
-  reopened with the same row selected. Esc or a 30 s timeout cancels and
-  reopens unchanged.
+- **Position capture**: Capture hides the modeless dialog and installs an
+  application event filter; a small instruction window explains that the
+  interact window can be opened now. On a press over an interact window's
+  `preview` child, `obs_browser_hid_capture_interact_click()` maps the
+  event's widget-local position (not a global cursor position, which is
+  unreliable on Wayland) to source-canvas pixels by repeating
+  `OBSBasicInteraction::GetSourceRelativeXY()` (device-pixel-ratio scaling,
+  then the aspect-fit centre/scale math from `display-helpers.hpp`). The
+  press and its release are both swallowed; on release X/Y go through the
+  normal spin-box edit path and the dialog is shown again. Esc, the overlay's
+  Cancel button, or a 60 s timeout aborts without changes. Source lookup uses
+  the interact title's locale prefix first and, for locales that wrap `%1` in
+  other text, the longest browser-source name contained in the title.
 - **Threading**: everything here runs on the Qt GUI thread; blocking CEF
   input calls are the same ones the frontend already makes. Because the dock
   calls the shared dispatch from that thread, the `interact` resolver must not

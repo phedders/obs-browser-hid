@@ -219,18 +219,19 @@ from inside OBS without any websocket client:
   interact** buttons to select the virtual sources;
 - **Rescan** refreshes the list (it also refreshes automatically on scene
   changes and when OBS finishes loading);
-- **Settings...** opens the quick-action editor, where each entry gets a
-  **name** and is either a **keyboard key** (key name, modifiers, optional
-  text override, press/release mode) or a **mouse click** (x/y, button, click
-  count, modifiers, press/release mode);
+- **Settings...** opens the quick-action editor as a **non-modal window** -
+  OBS, the scene view and interact windows stay usable while it is open.
+  Each entry gets a **name** and is either a **keyboard key** (key name,
+  modifiers, optional text override, press/release mode) or a **mouse click**
+  (x/y, button, click count, modifiers, press/release mode);
 - drag rows in the settings list to **reorder** the buttons, or use
   Up/Down; **Import... / Export...** read/write a JSON action list
   (same format as `settings.json`), with append-or-replace on import;
-- **Capture from interact window...** (mouse actions) temporarily closes the
-  dialog: click inside the source's open interact window and its click
-  position is filled into X/Y (press Esc to cancel, 30 s timeout). The click
-  is swallowed, so it does not reach the page; the status line reports the
-  source it was captured from;
+- **Capture from interact window...** (mouse actions) hides the editor and
+  arms capture: open the source's interact window if needed and click inside
+  it. The click position is filled into X/Y and the editor reappears. Both
+  the press and release are swallowed, so the page does not receive the
+  click. Press Esc, use **Cancel capture**, or wait 60 s to abort;
 - each action also gets an OBS **frontend hotkey**. Bind keys under
   **Settings → Hotkeys**; entries are listed as `Browser HID: <action name>`
   and run against the currently selected dock target. Bindings are stored in

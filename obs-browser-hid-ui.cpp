@@ -385,21 +385,23 @@ protected:
 
 class SettingsDialog : public QDialog {
 public:
-	enum { ResultCapture = 2 };
-
 	explicit SettingsDialog(std::vector<QuickAction> actions, QWidget *parent,
 				int select_row = 0)
 		: QDialog(parent), actions_(std::move(actions))
 	{
 		setWindowTitle("Browser HID quick actions");
-		setModal(true);
+		/* Non-modal: OBS stays usable while editing (and the interact
+		 * window can be opened/used without closing this dialog). */
+		setModal(false);
 		resize(780, 500);
 		build_ui();
 		refill_list(actions_.empty() ? -1 : select_row);
 	}
 
+	~SettingsDialog() override { stop_capture(false); }
+
 	const std::vector<QuickAction> &actions() const { return actions_; }
-	int current_row() const { return list_->currentRow(); }
+	bool is_capturing() const { return capturing_; }
 
 private:
 	void build_ui()
@@ -538,12 +540,7 @@ private:
 		connect(downButton, &QPushButton::clicked, this, [this] { move_action(1); });
 		connect(importButton_, &QPushButton::clicked, this, [this] { import_actions(); });
 		connect(exportButton_, &QPushButton::clicked, this, [this] { export_actions(); });
-		connect(captureButton_, &QPushButton::clicked, this, [this] {
-			if (loading_)
-				return;
-			store_current();
-			done(ResultCapture);
-		});
+		connect(captureButton_, &QPushButton::clicked, this, [this] { start_capture(); });
 
 		auto onEdit = [this] {
 			if (loading_)
@@ -820,8 +817,134 @@ private:
 					     "Could not write the selected file.");
 	}
 
+	/* ---- click position capture ---- */
+
+	void start_capture()
+	{
+		if (loading_ || capturing_)
+			return;
+		store_current();
+
+		const int row = list_->currentRow();
+		if (row < 0 || row >= (int)actions_.size())
+			return;
+
+		capturing_ = true;
+		capturePressValid_ = false;
+		const int token = ++captureToken_;
+
+		/* Hide this window so the user can open and use the interact
+		 * window. OBS is not modal, so everything else stays usable. */
+		hide();
+		qApp->installEventFilter(this);
+
+		auto *hint = new QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint |
+						       Qt::WindowStaysOnTopHint);
+		hint->setAttribute(Qt::WA_ShowWithoutActivating);
+		hint->setAttribute(Qt::WA_StyledBackground, true);
+		hint->setStyleSheet(
+			"background:#202020; color:#ffffff; border:1px solid #777777;");
+		auto *layout = new QVBoxLayout(hint);
+		auto *label = new QLabel(
+			"Click inside the browser source's interact window.\n"
+			"If it is not open yet, open it now (right-click the source -> "
+			"Interact).\nThe click is ignored by the page. Esc cancels.",
+			hint);
+		label->setWordWrap(true);
+		layout->addWidget(label);
+		auto *cancel = new QPushButton("Cancel capture (Esc)", hint);
+		layout->addWidget(cancel);
+		connect(cancel, &QPushButton::clicked, this, [this] { stop_capture(true); });
+		hint->adjustSize();
+		hint->move(QCursor::pos() + QPoint(24, 24));
+		hint->show();
+		captureHint_ = hint;
+
+		QTimer::singleShot(60000, this, [this, token] {
+			if (capturing_ && token == captureToken_)
+				stop_capture(true);
+		});
+	}
+
+	void stop_capture(bool show_dialog)
+	{
+		++captureToken_;
+		capturing_ = false;
+		capturePressValid_ = false;
+		if (qApp)
+			qApp->removeEventFilter(this);
+		if (captureHint_) {
+			captureHint_->hide();
+			delete captureHint_;
+			captureHint_ = nullptr;
+		}
+		if (show_dialog) {
+			show();
+			raise();
+			activateWindow();
+		}
+	}
+
+	bool eventFilter(QObject *watched, QEvent *event) override
+	{
+		if (!capturing_)
+			return QDialog::eventFilter(watched, event);
+
+		if (event->type() == QEvent::KeyPress) {
+			auto *key = static_cast<QKeyEvent *>(event);
+			if (key->key() == Qt::Key_Escape) {
+				stop_capture(true);
+				return true;
+			}
+		} else if (event->type() == QEvent::MouseButtonPress) {
+			auto *mouse = static_cast<QMouseEvent *>(event);
+			auto *watched_widget = qobject_cast<QWidget *>(watched);
+			const QPoint local = mouse->position().toPoint();
+			const QPoint global = mouse->globalPosition().toPoint();
+			void *target = watched_widget
+					       ? static_cast<void *>(watched_widget)
+					       : nullptr;
+			const int px = watched_widget ? local.x() : global.x();
+			const int py = watched_widget ? local.y() : global.y();
+			int x = 0, y = 0;
+			char source_name[256] = {0};
+			if (obs_browser_hid_capture_interact_click(
+				    target, px, py, &x, &y, source_name,
+				    sizeof(source_name))) {
+				capturePressValid_ = true;
+				captureX_ = x;
+				captureY_ = y;
+				captureSourceName_ = QString::fromUtf8(source_name);
+				/* swallow the press; the matching release
+				 * completes the capture */
+				return true;
+			}
+		} else if (event->type() == QEvent::MouseButtonRelease) {
+			if (capturePressValid_) {
+				capturePressValid_ = false;
+				/* goes through the normal edit path, which
+				 * updates actions_ and the list item */
+				xSpin_->setValue(captureX_);
+				ySpin_->setValue(captureY_);
+				stop_capture(true);
+				return true;
+			}
+		}
+
+		return QDialog::eventFilter(watched, event);
+	}
+
 	std::vector<QuickAction> actions_;
 	bool loading_ = false;
+
+	/* position-capture state (dialog hidden while armed) */
+	bool capturing_ = false;
+	int captureToken_ = 0;
+	QWidget *captureHint_ = nullptr;
+	bool capturePressValid_ = false;
+	int captureX_ = 0;
+	int captureY_ = 0;
+	QString captureSourceName_;
 
 	ActionListWidget *list_ = nullptr;
 	QPushButton *addButton_ = nullptr;
@@ -905,7 +1028,6 @@ public:
 
 	~HidDock() override
 	{
-		stop_capture_ui();
 		for (const auto &reg : hotkeys_)
 			obs_hotkey_unregister(reg->id);
 		hotkeys_.clear();
@@ -944,8 +1066,6 @@ public:
 	/** Runs the action whose stable UUID matches (call on the GUI thread). */
 	void trigger_hotkey(const QString &uuid)
 	{
-		if (captureActive_)
-			return;
 		for (int i = 0; i < (int)actions_.size(); i++) {
 			if (actions_[i].uuid == uuid) {
 				run_action(i);
@@ -1181,167 +1301,35 @@ private:
 			set_status("Could not save settings (see OBS log).", true);
 	}
 
-	void open_settings(int select_row = 0)
+	void open_settings()
 	{
-		open_settings_with(actions_, select_row);
-	}
-
-	void open_settings_with(std::vector<QuickAction> working, int select_row)
-	{
-		SettingsDialog dialog(std::move(working), this, select_row);
-		const int result = dialog.exec();
-
-		if (result == SettingsDialog::ResultCapture) {
-			pendingActions_ = dialog.actions();
-			pendingRow_ = dialog.current_row();
-			start_capture();
-			return;
-		}
-		if (result != QDialog::Accepted) {
-			pendingActions_.clear();
+		if (settingsDialog_) {
+			if (!settingsDialog_->is_capturing()) {
+				settingsDialog_->show();
+				settingsDialog_->raise();
+				settingsDialog_->activateWindow();
+			}
 			return;
 		}
 
-		apply_actions(dialog.actions());
-		pendingActions_.clear();
-	}
-
-	/* ---- click position capture ---- */
-
-	void reopen_settings_soon(int row)
-	{
-		const std::vector<QuickAction> next = pendingActions_;
-		QTimer::singleShot(0, this,
-				   [this, next, row] { open_settings_with(next, row); });
-	}
-
-	void start_capture()
-	{
-		if (pendingRow_ < 0 || pendingRow_ >= (int)pendingActions_.size())
-			return;
-		if (pendingActions_[pendingRow_].type != ActionMouse) {
-			set_status("Position capture is only available for mouse actions.", true);
-			reopen_settings_soon(pendingRow_);
-			return;
-		}
-
-		char *interact_name = obs_browser_hid_interact_source_name();
-		const bool has_interact = interact_name != nullptr;
-		bfree(interact_name);
-		if (!has_interact) {
-			set_status("No interact window is open - open one for the source "
-				   "first, then capture again.",
-				   true);
-			reopen_settings_soon(pendingRow_);
-			return;
-		}
-
-		stop_capture_ui();
-		captureActive_ = true;
-		const int token = ++captureToken_;
-		qApp->installEventFilter(this);
-
-		captureHint_ = new QLabel(
-			"Click inside the browser source's interact window to capture the "
-			"position.\nPress Esc to cancel. The click is not sent to the page.",
-			nullptr, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
-		captureHint_->setAttribute(Qt::WA_ShowWithoutActivating);
-		captureHint_->setAlignment(Qt::AlignCenter);
-		captureHint_->setMargin(12);
-		captureHint_->setStyleSheet(
-			"background:#202020; color:#ffffff; border:1px solid #777777;");
-		captureHint_->adjustSize();
-		captureHint_->move(QCursor::pos() + QPoint(24, 24));
-		captureHint_->show();
-
-		set_status("Capture mode: click in the interact window (Esc cancels).", false);
-
-		QTimer::singleShot(30000, this, [this, token] {
-			if (captureActive_ && token == captureToken_)
-				cancel_capture();
+		auto *dialog = new SettingsDialog(actions_, this);
+		settingsDialog_ = dialog;
+		connect(dialog, &QDialog::finished, this, [this, dialog](int result) {
+			settingsDialog_ = nullptr;
+			if (result == QDialog::Accepted)
+				apply_actions(dialog->actions());
+			dialog->deleteLater();
 		});
-	}
-
-	void stop_capture_ui()
-	{
-		++captureToken_;
-		captureActive_ = false;
-		capturePressValid_ = false;
-		captureSourceName_.clear();
-		if (qApp)
-			qApp->removeEventFilter(this);
-		if (captureHint_) {
-			captureHint_->hide();
-			delete captureHint_;
-			captureHint_ = nullptr;
-		}
-	}
-
-	void finish_capture(int x, int y, const QString &source_name)
-	{
-		stop_capture_ui();
-		if (pendingRow_ >= 0 && pendingRow_ < (int)pendingActions_.size()) {
-			pendingActions_[pendingRow_].x = x;
-			pendingActions_[pendingRow_].y = y;
-		}
-		set_status(QString("Captured %1,%2 from '%3'.")
-				   .arg(x)
-				   .arg(y)
-				   .arg(source_name),
-			   false);
-
-		reopen_settings_soon(pendingRow_);
-	}
-
-	void cancel_capture()
-	{
-		stop_capture_ui();
-		set_status("Position capture cancelled.", false);
-		reopen_settings_soon(pendingRow_);
+		/* Non-modal: the OBS window, scene view and interact windows
+		 * remain usable while the editor is open. */
+		dialog->show();
 	}
 
 	bool eventFilter(QObject *watched, QEvent *event) override
 	{
 		if (actionsScroll_ && watched == actionsScroll_->viewport() &&
-		    event->type() == QEvent::Resize) {
+		    event->type() == QEvent::Resize)
 			relayout_actions();
-			return false;
-		}
-
-		if (!captureActive_)
-			return QWidget::eventFilter(watched, event);
-
-		if (event->type() == QEvent::KeyPress) {
-			auto *key = static_cast<QKeyEvent *>(event);
-			if (key->key() == Qt::Key_Escape) {
-				cancel_capture();
-				return true;
-			}
-		} else if (event->type() == QEvent::MouseButtonPress) {
-			auto *mouse = static_cast<QMouseEvent *>(event);
-			const QPoint global = mouse->globalPosition().toPoint();
-			int x = 0, y = 0;
-			char source_name[256] = {0};
-			if (obs_browser_hid_capture_interact_click(
-				    global.x(), global.y(), &x, &y, source_name,
-				    sizeof(source_name))) {
-				capturePressValid_ = true;
-				captureX_ = x;
-				captureY_ = y;
-				captureSourceName_ = QString::fromUtf8(source_name);
-				/* swallow the press so page controls do not
-				 * activate; the matching release is swallowed
-				 * below and completes the capture */
-				return true;
-			}
-		} else if (event->type() == QEvent::MouseButtonRelease) {
-			if (capturePressValid_) {
-				capturePressValid_ = false;
-				finish_capture(captureX_, captureY_, captureSourceName_);
-				return true;
-			}
-		}
-
 		return QWidget::eventFilter(watched, event);
 	}
 
@@ -1419,19 +1407,11 @@ private:
 
 	std::vector<QuickAction> actions_;
 
+	/* the single modeless settings window, if open */
+	SettingsDialog *settingsDialog_ = nullptr;
+
 	/* per-action hotkey registrations, keyed by action UUID */
 	std::vector<std::unique_ptr<HotkeyReg>> hotkeys_;
-
-	/* position-capture state */
-	bool captureActive_ = false;
-	int captureToken_ = 0;
-	QLabel *captureHint_ = nullptr;
-	bool capturePressValid_ = false;
-	int captureX_ = 0;
-	int captureY_ = 0;
-	QString captureSourceName_;
-	std::vector<QuickAction> pendingActions_;
-	int pendingRow_ = 0;
 };
 
 void hotkey_callback(void *data, obs_hotkey_id, obs_hotkey_t *, bool pressed)
