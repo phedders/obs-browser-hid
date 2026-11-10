@@ -389,8 +389,10 @@ void apply_theme_icon(QToolButton *button, const char *style_class,
 	button->setIcon(icon);
 }
 
-/** QListWidget that reports drops so the action vector can follow the
- *  visual order (the model has no reliable moveRows signal here). */
+/** QListWidget that performs internal drag/drop moves itself. Letting the
+ *  view go through the model/MIME path could reorder the visible list before
+ *  the action vector was synced (and the sync then silently bailed on a
+ *  transient count mismatch), leaving the editor bound to the wrong action. */
 class ActionListWidget : public QListWidget {
 public:
 	explicit ActionListWidget(QWidget *parent = nullptr) : QListWidget(parent) {}
@@ -399,7 +401,56 @@ public:
 protected:
 	void dropEvent(QDropEvent *event) override
 	{
+		if (event->source() != this) {
+			event->ignore();
+			return;
+		}
+
+		int from = currentRow();
+		if (from < 0) {
+			const auto selected = selectedItems();
+			if (!selected.isEmpty())
+				from = row(selected.first());
+		}
+		if (from < 0) {
+			event->ignore();
+			return;
+		}
+
+		const QModelIndex target = indexAt(event->position().toPoint());
+		int to = target.isValid() ? target.row() : count();
+		if (target.isValid() &&
+		    dropIndicatorPosition() == QAbstractItemView::BelowItem)
+			to++;
+
+		if (from < to)
+			to--;
+		to = std::clamp(to, 0, count() - 1);
+		if (to == from) {
+			event->setDropAction(Qt::MoveAction);
+			event->accept();
+			/* Let the view record that the drop was handled so its
+			 * startDrag() cleanup does not delete the item. */
+			QListWidget::dropEvent(event);
+			return;
+		}
+
+		QListWidgetItem *item = takeItem(from);
+		if (!item) {
+			event->ignore();
+			return;
+		}
+		insertItem(to, item);
+		setCurrentItem(item);
+		event->setDropAction(Qt::MoveAction);
+		event->accept();
+
+		/* We already moved the item. Calling the base with an accepted
+		 * event makes QListView set its internal dropEventMoved flag
+		 * (without dropping a second copy), which prevents
+		 * startDrag() from removeRows()ing the moved item afterwards. */
 		QListWidget::dropEvent(event);
+
 		if (afterDrop)
 			afterDrop();
 	}
@@ -663,6 +714,9 @@ private:
 			return;
 		}
 
+		/* takeItem() during a manual drag emits currentRowChanged(-1),
+		 * which disables the editors; re-enable them for a valid row. */
+		set_editors_enabled(true);
 		loading_ = true;
 		const QuickAction &a = actions_[row];
 		nameEdit_->setText(a.name);
@@ -726,8 +780,12 @@ private:
 			if (it != actions_.end())
 				reordered.push_back(*it);
 		}
-		if (reordered.size() != actions_.size())
+		if (reordered.size() != actions_.size()) {
+			blog(LOG_WARNING,
+			     "[obs-browser-hid] drag/drop reorder lost an action id; restoring the previous order");
+			refill_list(0);
 			return;
+		}
 
 		actions_ = std::move(reordered);
 		load_row(std::clamp(list_->currentRow(), 0, (int)actions_.size() - 1));
