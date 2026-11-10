@@ -114,6 +114,8 @@ deb: check-version dist
 source: check-version dist
 	dpkg-buildpackage -S -us -uc
 	mv -f ../obs-browser-hid_$(VERSION).dsc ../obs-browser-hid_$(VERSION).tar.* $(DIST)/
+	-mv -f ../obs-browser-hid_$(VERSION)_source.changes \
+		../obs-browser-hid_$(VERSION)_source.buildinfo $(DIST)/ 2>/dev/null || true
 	@echo "Debian source package:"
 	@ls -1 $(DIST)/*.dsc
 
