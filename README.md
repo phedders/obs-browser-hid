@@ -19,6 +19,10 @@ request:
 > landed. `ws-obs` still accepts `obs-keypress` as a deprecated alias (the
 > plugin only registers `obs-browser-hid`).
 
+The same actions are also available from an in-OBS **Browser HID dock**
+(target source picker + configurable quick-action buttons); see
+[Dock (in-OBS controls)](#dock-in-obs-controls).
+
 ## Virtual source names
 
 The `sourceName` field understands two special names, resolved by the plugin
@@ -203,6 +207,31 @@ Mouse coordinates are in the source's own canvas ((0,0) = source top-left).
 `ws-obs` exit codes: `0` success, `1` connection/request/plugin error, `2`
 usage error. Set `WSOBS_DEBUG=1` to dump raw response JSON to stderr.
 
+## Dock (in-OBS controls)
+
+The plugin registers a **Browser HID** dock, so the same actions can be run
+from inside OBS without any websocket client:
+
+- open it via **View → Docks → Browser HID** (OBS remembers dock visibility
+  per scene collection);
+- pick the **target source** from the dropdown (all browser sources found in
+  the current profile are listed), or use the **Use current** / **Use
+  interact** buttons to select the virtual sources;
+- **Rescan** refreshes the list (it also refreshes automatically on scene
+  changes and when OBS finishes loading);
+- **Settings...** opens the quick-action editor, where each entry gets a
+  **name** and is either a **keyboard key** (key name, modifiers, optional
+  text override, press/release mode) or a **mouse click** (x/y, button, click
+  count, modifiers, press/release mode);
+- the dock shows one button per configured action; clicking it sends the
+  input to the selected target and reports success or the plugin's error
+  message at the bottom.
+
+Quick actions and the last selected target are stored in
+`<obs-config>/plugin_config/obs-browser-hid/settings.json`
+(`settings.json.bak` is kept as a backup on save). Input goes directly through
+libobs, so the dock works even when the obs-websocket server is disabled.
+
 ## Input hardening & threat model
 
 Everything below is deliberately bounded because vendor request payloads are
@@ -288,11 +317,16 @@ in your obs-studio checkout for development runs.
 - This is a *plugin* (C, links libobs + libxkbcommon), loaded by OBS like any
   other addon; it does not need separate WebSocket transport of its own -
   everything goes through the regular obs-websocket server/port/auth.
+- The dock and settings dialog require a Qt OBS frontend (the normal desktop
+  app); they are skipped in headless builds. The quick-action editor is
+  English-only for now.
 
 ## Files
 
-- `obs-browser-hid.c` - the plugin
+- `obs-browser-hid.c` - the plugin core (vendor requests + input dispatch)
+- `obs-browser-hid.h` - shared C API between the core, the interact helper and the dock
 - `obs-browser-hid-interact.cpp` - Qt helper that resolves the open "interact" window to a source name
+- `obs-browser-hid-ui.cpp` - the "Browser HID" dock and the quick-action settings dialog
 - `obs-websocket-api.h` - vendored verbatim from `plugins/obs-websocket/lib/` of the obs-studio repo (header-only vendor C API)
 - `CMakeLists.txt` - standalone build against the local obs-studio build tree
 - `ws-obs-client/` - Rust CLI source (`cargo build --release`)

@@ -81,22 +81,33 @@ use). Consequences of the rename:
 ## 2. Architecture
 
 ```
-external process
-   │  ws-obs ...  (or any obs-websocket client)
-   ▼
-obs-websocket (bundled with OBS)  ── CallVendorRequest ──►  obs-browser-hid vendor
-                                                              │
-                                     resolve source by name / UUID / virtual
-                                                              ▼
-                                              obs_source_send_key_click()
-                                              obs_source_send_mouse_move()
-                                              obs_source_send_mouse_click()
-                                                              ▼
-                                           obs-browser  →  CEF SendKeyEvent /
-                                                           SendMouseClickEvent
-                                                              ▼
-                                                page DOM events (keydown, ...)
+external process                                        Browser HID dock (Qt)
+   │  ws-obs ...  (or any obs-websocket client)           │  quick-action buttons
+   ▼                                                      ▼
+obs-websocket  ── CallVendorRequest ──►  vendor handlers  │
+                                         │                │
+                                         └──────┬─────────┘
+                                                ▼
+                                 obs_browser_hid_send_key/_text/_mouse_click()
+                                 (obs-browser-hid.h - shared dispatch)
+                                                ▼
+                               resolve source by name / UUID / "current" /
+                               "interact"
+                                                ▼
+                              obs_source_send_key_click()
+                              obs_source_send_mouse_move()
+                              obs_source_send_mouse_click()
+                                                ▼
+                             obs-browser  →  CEF SendKeyEvent /
+                                             SendMouseClickEvent
+                                                ▼
+                                  page DOM events (keydown, ...)
 ```
+
+Both entry points go through the same `extern "C"` functions declared in
+`obs-browser-hid.h`, so the dock and the websocket path cannot drift apart
+(validation, clamping, logging, virtual source resolution and key mapping are
+shared).
 
 ### Why vendor requests?
 
@@ -168,6 +179,41 @@ obs-websocket always reports vendor requests as `requestStatus: success`; a
 vendor failure is only visible as
 `responseData.responseData.error`. The plugin therefore puts a human-readable
 string there, and `ws-obs` inspects that path and exits non-zero.
+
+### Dock UI (`obs-browser-hid-ui.cpp`)
+
+The dock is added from `obs_module_post_load()` with
+`obs_frontend_add_dock_by_id("obs-browser-hid", "Browser HID", widget)`.
+That is safe there because modules load from `OBSBasic::OBSInit()` after the
+main window (and the frontend API object) exists. The dock starts hidden, as
+OBS plugin docks do; users enable it under **View → Docks**.
+
+Design points:
+
+- **No `Q_OBJECT`/moc**: the classes only use lambdas with
+  `QObject::connect`, so the build needs no AUTOMOC step. Adding signals or
+  `tr()` contexts later means switching the target to AUTOMOC (or moving the
+  classes into headers).
+- **Shared dispatch**: quick actions call the same
+  `obs_browser_hid_send_*()` functions as the vendor handlers, so the dock
+  works with obs-websocket disabled and cannot bypass input limits.
+- **Source list**: `obs_enum_sources()` filtered on `browser_source`,
+  sorted case-insensitively, with "current" / "interact" pinned on top. The
+  list is rebuilt on dock creation, on *Rescan*, and on the frontend events
+  `FINISHED_LOADING`, `SCENE_LIST_CHANGED`, `SCENE_CHANGED` and
+  `PREVIEW_SCENE_CHANGED`; the current selection is preserved when it still
+  exists.
+- **Settings persistence**: `settings.json` (and `.bak`) in the plugin's
+  `plugin_config` directory via `obs_module_config_path()`, saved with
+  `obs_data_save_json_pretty_safe()`. The file holds an object array
+  (`name`, `type`, `key`, `modifiers`, `mode`, `text`, `x`, `y`, `button`,
+  `clickCount`) plus the last selected `target`. Values are sanitized on
+  load, so a corrupt/hand-edited file cannot create out-of-range actions.
+- **Editing model**: the settings dialog edits a copy and only commits on OK;
+  the form applies changes to the selected action immediately (guarded by a
+  `loading_` flag while fields are programmatically populated).
+- **Threading**: everything here runs on the Qt GUI thread; blocking CEF
+  input calls are the same ones the frontend already makes.
 
 ---
 
@@ -272,8 +318,10 @@ the client's frame cap.
 
 | Path | Purpose |
 |------|---------|
-| `obs-browser-hid.c` | plugin entry point, vendor registration, `SendKey`/`SendText`/`SendMouseClick`, virtual-source resolution, hardening limits |
+| `obs-browser-hid.c` | plugin entry point, vendor registration, `SendKey`/`SendText`/`SendMouseClick`, input dispatch, virtual-source resolution, hardening limits |
+| `obs-browser-hid.h` | shared C API used by the vendor handlers and the dock |
 | `obs-browser-hid-interact.cpp` | Qt helper: open interact window → browser source name |
+| `obs-browser-hid-ui.cpp` | "Browser HID" dock, source picker and quick-action settings dialog |
 | `obs-websocket-api.h` | obs-websocket vendor C API, vendored verbatim from the obs-studio tree |
 | `CMakeLists.txt` | standalone build (libobs, libobs-frontend-api, Qt6 Widgets, libxkbcommon) |
 | `ws-obs-client/src/main.rs` | Rust CLI: arg parsing, payload building, v5 protocol handshake/auth, hardening |
@@ -306,6 +354,11 @@ the client's frame cap.
 5. **Source discovery.** A small read-only request (e.g. `ListBrowserSources`)
    returning names/UUIDs and whether a source is in the program scene would
    make `ws-obs` scripts self-configuring.
+6. **Dock polish.** The quick actions are a flat list; drag-reorder,
+   import/export, per-action target overrides, a hotkey per action and
+   translated strings (needs AUTOMOC + `obs_frontend_push_ui_translation`)
+   are natural follow-ups. A "learn from interact window" button could
+   capture a click position directly instead of typing x/y.
 
 ### Design constraints to preserve
 
