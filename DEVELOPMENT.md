@@ -230,6 +230,12 @@ Design points:
   hint and placed by a `QGridLayout` whose column count is recomputed from
   the scroll viewport width (`relayout_actions()` on viewport resize), so
   they shrink to text and fit several per row.
+- **Compact layout and icons**: margins/spacings are deliberately small
+  (4 px at the root, 6/3/6/5 inside group boxes, 4 px grid). The settings
+  action is a 22 px auto-raised `QToolButton` in the bottom row next to the
+  status label, and Rescan uses the theme refresh icon. Both use OBS's QSS
+  classes (`icon-cogs`, `icon-refresh`) and are re-polished so the theme
+  supplies the icon; a dark/light resource path is the fallback.
 - **Hotkeys**: every action gets
   `obs_hotkey_register_frontend("obs-browser-hid.action.<uuid>", ...)`;
   renames only call `obs_hotkey_set_description()`, so bindings survive.

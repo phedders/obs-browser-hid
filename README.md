@@ -215,15 +215,16 @@ from inside OBS without any websocket client:
 - open it via **View → Docks → Browser HID** (OBS remembers dock visibility
   per scene collection);
 - pick the **target source** from the dropdown (all browser sources found in
-  the current profile are listed), or use the **Use current** / **Use
-  interact** buttons to select the virtual sources;
-- **Rescan** refreshes the list (it also refreshes automatically on scene
-  changes and when OBS finishes loading);
-- **Settings...** opens the quick-action editor as a **non-modal window** -
-  OBS, the scene view and interact windows stay usable while it is open.
-  Each entry gets a **name** and is either a **keyboard key** (key name,
-  modifiers, optional text override, press/release mode) or a **mouse click**
-  (x/y, button, click count, modifiers, press/release mode);
+  the current profile are listed), or use the **Current** / **Interact**
+  buttons to select the virtual sources;
+- the refresh icon (right of those buttons) rescans the list (it also
+  refreshes automatically on scene changes and when OBS finishes loading);
+- the **cog** at the bottom right opens the quick-action editor as a
+  **non-modal window** - OBS, the scene view and interact windows stay
+  usable while it is open. Each entry gets a **name** and is either a
+  **keyboard key** (key name, modifiers, optional text override,
+  press/release mode) or a **mouse click** (x/y, button, click count,
+  modifiers, press/release mode);
 - drag rows in the settings list to **reorder** the buttons, or use
   Up/Down; **Import... / Export...** read/write a JSON action list
   (same format as `settings.json`), with append-or-replace on import;

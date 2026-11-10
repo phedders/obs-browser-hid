@@ -38,6 +38,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -52,8 +53,10 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStringList>
+#include <QStyle>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -361,6 +364,29 @@ QComboBox *make_button_combo()
 	combo->addItem("Middle", "middle");
 	combo->addItem("Right", "right");
 	return combo;
+}
+
+/** Styles a compact tool button with one of OBS's theme icon classes
+ *  (.icon-cogs, .icon-refresh, ...). The theme QSS supplies the icon; if
+ *  that fails, load the dark/light resource directly. */
+void apply_theme_icon(QToolButton *button, const char *style_class,
+		      const char *dark_fallback, const char *light_fallback)
+{
+	button->setAutoRaise(true);
+	button->setIconSize(QSize(16, 16));
+	button->setFixedSize(22, 22);
+	button->setProperty("class", QString::fromLatin1(style_class));
+
+	/* Dynamic properties are only picked up after a re-polish. */
+	button->style()->unpolish(button);
+	button->style()->polish(button);
+	if (!button->icon().isNull())
+		return;
+
+	QIcon icon(obs_frontend_is_theme_dark() ? dark_fallback : light_fallback);
+	if (icon.isNull())
+		icon = QIcon(light_fallback);
+	button->setIcon(icon);
 }
 
 /** QListWidget that reports drops so the action vector can follow the
@@ -1108,23 +1134,31 @@ private:
 	void build_ui()
 	{
 		auto *root = new QVBoxLayout(this);
-		root->setContentsMargins(8, 8, 8, 8);
+		root->setContentsMargins(4, 4, 4, 4);
+		root->setSpacing(4);
 
 		auto *targetGroup = new QGroupBox("Target browser source", this);
 		auto *targetLayout = new QVBoxLayout(targetGroup);
+		targetLayout->setContentsMargins(6, 3, 6, 5);
+		targetLayout->setSpacing(4);
 
 		target_ = new QComboBox(targetGroup);
-		target_->setMinimumContentsLength(24);
+		target_->setMinimumContentsLength(18);
 		target_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 		targetLayout->addWidget(target_);
 
 		auto *targetButtons = new QHBoxLayout;
-		auto *currentButton = new QPushButton("Use current", targetGroup);
-		auto *interactButton = new QPushButton("Use interact", targetGroup);
-		auto *rescanButton = new QPushButton("Rescan", targetGroup);
+		targetButtons->setContentsMargins(0, 0, 0, 0);
+		targetButtons->setSpacing(4);
+		auto *currentButton = new QPushButton("Current", targetGroup);
+		auto *interactButton = new QPushButton("Interact", targetGroup);
+		auto *rescanButton = new QToolButton(targetGroup);
 		currentButton->setToolTip("First browser source in the programme scene");
 		interactButton->setToolTip("Browser source with an open interact window");
 		rescanButton->setToolTip("Rescan browser sources");
+		rescanButton->setAccessibleName("Rescan browser sources");
+		apply_theme_icon(rescanButton, "icon-refresh", "theme:Dark/refresh.svg",
+				 ":/res/images/refresh.svg");
 		targetButtons->addWidget(currentButton);
 		targetButtons->addWidget(interactButton);
 		targetButtons->addStretch(1);
@@ -1134,6 +1168,8 @@ private:
 
 		auto *actionsGroup = new QGroupBox("Quick actions", this);
 		auto *actionsLayout = new QVBoxLayout(actionsGroup);
+		actionsLayout->setContentsMargins(6, 3, 6, 5);
+		actionsLayout->setSpacing(4);
 
 		actionsScroll_ = new QScrollArea(actionsGroup);
 		actionsScroll_->setWidgetResizable(true);
@@ -1141,23 +1177,29 @@ private:
 		actionsHost_ = new QWidget;
 		actionsGrid_ = new QGridLayout(actionsHost_);
 		actionsGrid_->setContentsMargins(0, 0, 0, 0);
-		actionsGrid_->setSpacing(6);
+		actionsGrid_->setSpacing(4);
 		actionsGrid_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
 		actionsScroll_->setWidget(actionsHost_);
 		actionsScroll_->viewport()->installEventFilter(this);
 		actionsLayout->addWidget(actionsScroll_, 1);
-
-		auto *bottom = new QHBoxLayout;
-		settingsButton_ = new QPushButton("Settings...", actionsGroup);
-		bottom->addWidget(settingsButton_);
-		bottom->addStretch(1);
-		actionsLayout->addLayout(bottom);
 		root->addWidget(actionsGroup, 1);
 
+		/* status text and the settings cog share the bottom row */
+		auto *bottom = new QHBoxLayout;
+		bottom->setContentsMargins(0, 0, 0, 0);
+		bottom->setSpacing(4);
 		status_ = new QLabel(this);
 		status_->setWordWrap(true);
 		status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-		root->addWidget(status_);
+		bottom->addWidget(status_, 1);
+
+		settingsButton_ = new QToolButton(this);
+		settingsButton_->setToolTip("Quick action settings");
+		settingsButton_->setAccessibleName("Quick action settings");
+		apply_theme_icon(settingsButton_, "icon-cogs", "theme:Dark/cogs.svg",
+				 ":/res/images/cogs.svg");
+		bottom->addWidget(settingsButton_, 0, Qt::AlignBottom | Qt::AlignRight);
+		root->addLayout(bottom);
 
 		/* wiring */
 		connect(currentButton, &QPushButton::clicked, this, [this] {
@@ -1170,9 +1212,9 @@ private:
 			if (idx >= 0)
 				target_->setCurrentIndex(idx);
 		});
-		connect(rescanButton, &QPushButton::clicked, this,
+		connect(rescanButton, &QToolButton::clicked, this,
 			[this] { refresh_sources(selected_target()); });
-		connect(settingsButton_, &QPushButton::clicked, this, [this] { open_settings(); });
+		connect(settingsButton_, &QToolButton::clicked, this, [this] { open_settings(); });
 		connect(target_, &QComboBox::currentIndexChanged, this, [this](int) {
 			save_settings(actions_, selected_target());
 		});
@@ -1402,7 +1444,7 @@ private:
 	std::vector<QPushButton *> actionButtons_;
 	int actionButtonWidth_ = 0;
 	int actionColumns_ = -1;
-	QPushButton *settingsButton_ = nullptr;
+	QToolButton *settingsButton_ = nullptr;
 	QLabel *status_ = nullptr;
 
 	std::vector<QuickAction> actions_;
