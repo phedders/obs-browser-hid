@@ -1,0 +1,11 @@
+# Build output
+/build/
+/ws-obs
+/ws-obs-client/target/
+
+# Editor/OS noise
+*.o
+*.so
+*.swp
+*~
+.DS_Store
