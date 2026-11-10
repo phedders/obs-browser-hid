@@ -1266,6 +1266,8 @@ private:
 	{
 		++captureToken_;
 		captureActive_ = false;
+		capturePressValid_ = false;
+		captureSourceName_.clear();
 		if (qApp)
 			qApp->removeEventFilter(this);
 		if (captureHint_) {
@@ -1323,9 +1325,19 @@ private:
 			if (obs_browser_hid_capture_interact_click(
 				    global.x(), global.y(), &x, &y, source_name,
 				    sizeof(source_name))) {
-				finish_capture(x, y, QString::fromUtf8(source_name));
-				/* swallow the click: capture must not activate
-				 * the page control under the cursor */
+				capturePressValid_ = true;
+				captureX_ = x;
+				captureY_ = y;
+				captureSourceName_ = QString::fromUtf8(source_name);
+				/* swallow the press so page controls do not
+				 * activate; the matching release is swallowed
+				 * below and completes the capture */
+				return true;
+			}
+		} else if (event->type() == QEvent::MouseButtonRelease) {
+			if (capturePressValid_) {
+				capturePressValid_ = false;
+				finish_capture(captureX_, captureY_, captureSourceName_);
 				return true;
 			}
 		}
@@ -1414,6 +1426,10 @@ private:
 	bool captureActive_ = false;
 	int captureToken_ = 0;
 	QLabel *captureHint_ = nullptr;
+	bool capturePressValid_ = false;
+	int captureX_ = 0;
+	int captureY_ = 0;
+	QString captureSourceName_;
 	std::vector<QuickAction> pendingActions_;
 	int pendingRow_ = 0;
 };
