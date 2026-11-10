@@ -21,15 +21,29 @@
  * a BlockingQueuedConnection would wait for the thread that is executing it
  * and deadlock, so the scan then runs directly.
  *
+ * This file also maps a click in an interact window back to source-canvas
+ * coordinates for the dock's "capture position" feature. The math mirrors
+ * OBSBasicInteraction::GetSourceRelativeXY() and GetScaleAndCenterPos() from
+ * frontend/utility/display-helpers.hpp.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
+
+#include "obs-browser-hid.h"
 
 #include <obs-frontend-api.h>
 
 #include <QApplication>
 #include <QMetaObject>
+#include <QPoint>
+#include <QSize>
 #include <QThread>
 #include <QWidget>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
 
 static bool is_browser_source_id(obs_source_t *src)
 {
@@ -62,28 +76,24 @@ static QString interaction_title_prefix(void)
 	return prefix;
 }
 
-/** Must be called from the Qt GUI thread. */
-static bool scan_interact_widget(QWidget *w, const QString &prefix, QString *result)
+/** Extracts the source name from an interact dialog title. Falls back to
+ *  matching the title suffix against all browser source names for locales
+ *  whose title pattern is unknown. Must be called from the Qt GUI thread. */
+static QString interact_title_source_name(QWidget *w, const QString &prefix)
 {
-	if (!w->isWindow() || !w->isVisible() || !w->inherits("OBSBasicInteraction"))
-		return false;
-
-	QString title = w->windowTitle();
+	const QString title = w->windowTitle();
 
 	if (title.length() > prefix.length() && title.startsWith(prefix)) {
 		QString name = title.mid(prefix.length());
 		/* en-US pattern ends the title with a quote around the name */
 		if (name.endsWith(u'\''))
 			name.chop(1);
-		if (!name.isEmpty()) {
-			*result = name;
-			return true;
-		}
+		if (!name.isEmpty())
+			return name;
 	}
 
 	/* Locale fallback: no known prefix -> look for a browser source whose
 	 * name is the title's suffix. */
-	QString match;
 	struct suffix_ctx {
 		QString title;
 		QString match;
@@ -103,12 +113,21 @@ static bool scan_interact_widget(QWidget *w, const QString &prefix, QString *res
 		return true;
 	};
 	obs_enum_sources(cb, &sctx);
-	if (!sctx.match.isEmpty()) {
-		*result = sctx.match;
-		return true;
-	}
+	return sctx.match;
+}
 
-	return false;
+/** Must be called from the Qt GUI thread. */
+static bool scan_interact_widget(QWidget *w, const QString &prefix, QString *result)
+{
+	if (!w->isWindow() || !w->isVisible() || !w->inherits("OBSBasicInteraction"))
+		return false;
+
+	const QString name = interact_title_source_name(w, prefix);
+	if (name.isEmpty())
+		return false;
+
+	*result = name;
+	return true;
 }
 
 /** Must be called from the Qt GUI thread. */
@@ -173,4 +192,111 @@ extern "C" char *obs_browser_hid_interact_source_name(void)
 	}
 
 	return result.isEmpty() ? NULL : bstrdup(result.toUtf8().constData());
+}
+
+/* ------------------------------------------------------------------ */
+/* Click position capture                                              */
+/* ------------------------------------------------------------------ */
+
+/** Same layout math as frontend/utility/display-helpers.hpp. */
+static void scale_and_center(int baseCX, int baseCY, int windowCX, int windowCY, int *x, int *y,
+			     float *scale)
+{
+	const double windowAspect = double(windowCX) / double(windowCY);
+	const double baseAspect = double(baseCX) / double(baseCY);
+	int newCX, newCY;
+
+	if (windowAspect > baseAspect) {
+		*scale = float(windowCY) / float(baseCY);
+		newCX = int(double(windowCY) * baseAspect);
+		newCY = windowCY;
+	} else {
+		*scale = float(windowCX) / float(baseCX);
+		newCX = windowCX;
+		newCY = int(float(windowCX) / baseAspect);
+	}
+
+	*x = windowCX / 2 - newCX / 2;
+	*y = windowCY / 2 - newCY / 2;
+}
+
+extern "C" bool obs_browser_hid_capture_interact_click(int global_x, int global_y, int *rel_x,
+						       int *rel_y, char *source_name,
+						       size_t source_name_size)
+{
+	QCoreApplication *app = QCoreApplication::instance();
+	if (!app || QThread::currentThread() != app->thread())
+		return false;
+
+	const QString prefix = interaction_title_prefix();
+	const QPoint global(global_x, global_y);
+
+	for (QWidget *w : QApplication::allWidgets()) {
+		if (!w->isWindow() || !w->isVisible() || !w->inherits("OBSBasicInteraction"))
+			continue;
+
+		/* ui->preview is the OBSQTDisplay that shows this source. */
+		QWidget *preview = w->findChild<QWidget *>("preview");
+		if (!preview || !preview->isVisible())
+			continue;
+
+		const QPoint local = preview->mapFromGlobal(global);
+		if (!preview->rect().contains(local))
+			continue;
+
+		const QString name = interact_title_source_name(w, prefix);
+		if (name.isEmpty())
+			continue;
+
+		obs_source_t *src = obs_get_source_by_name(name.toUtf8().constData());
+		if (!src || !is_browser_source_id(src)) {
+			obs_source_release(src);
+			continue;
+		}
+		uint32_t sourceCX = obs_source_get_width(src);
+		uint32_t sourceCY = obs_source_get_height(src);
+		obs_source_release(src);
+		if (!sourceCX)
+			sourceCX = 1;
+		if (!sourceCY)
+			sourceCY = 1;
+
+		const QSize size = preview->size() * preview->devicePixelRatioF();
+		if (size.width() <= 0 || size.height() <= 0)
+			continue;
+
+		/* obs-browser coordinates are pixels of the (unscaled) source
+		 * canvas; OBS scales the widget coordinate by the device
+		 * pixel ratio first, then un-does the aspect-fit transform. */
+		const float dpr = float(w->devicePixelRatioF());
+		const int mouseX = int(roundf(local.x() * dpr));
+		const int mouseY = int(roundf(local.y() * dpr));
+
+		int offX, offY;
+		float scale;
+		scale_and_center(int(sourceCX), int(sourceCY), size.width(), size.height(), &offX,
+				 &offY, &scale);
+
+		int x, y;
+		if (offX > 0) {
+			x = int(float(mouseX - offX) / scale);
+			y = int(float(mouseY) / scale);
+		} else {
+			x = int(float(mouseX) / scale);
+			y = int(float(mouseY - offY) / scale);
+		}
+
+		if (x < 0 || x > int(sourceCX) || y < 0 || y > int(sourceCY))
+			continue;
+
+		if (rel_x)
+			*rel_x = x;
+		if (rel_y)
+			*rel_y = y;
+		if (source_name && source_name_size)
+			snprintf(source_name, source_name_size, "%s", name.toUtf8().constData());
+		return true;
+	}
+
+	return false;
 }

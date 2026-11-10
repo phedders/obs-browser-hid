@@ -45,6 +45,21 @@ bool obs_browser_hid_send_mouse_click(const char *source_name, const char *sourc
 /** Creates the "Browser HID" dock. No-op when there is no Qt frontend. */
 void obs_browser_hid_ui_init(void);
 
+/**
+ * Name of the browser source shown in the first open interact window, or NULL
+ * when none is open. The result is bfree()-able.
+ */
+char *obs_browser_hid_interact_source_name(void);
+
+/**
+ * Maps a global screen position over a visible interact window back to the
+ * source-canvas coordinate shown in it. Must be called on the Qt GUI thread.
+ * Returns false when the point is not over an interact window's preview (or
+ * its source cannot be resolved). `source_name` receives the source name.
+ */
+bool obs_browser_hid_capture_interact_click(int global_x, int global_y, int *rel_x, int *rel_y,
+					    char *source_name, size_t source_name_size);
+
 #ifdef __cplusplus
 }
 #endif
